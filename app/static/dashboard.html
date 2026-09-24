@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#123b36">
+  <title>MtaaniWatch · Coordinator</title>
+  <style>
+    :root { color-scheme: light; --ink:#18302d; --muted:#63736f; --line:#dce6e2; --paper:#f4f7f5; --white:#fff; --green:#176b56; --green-dark:#123b36; --orange:#b95f20; --red:#a93f3f; }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--paper); color:var(--ink); font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    header { background:var(--green-dark); color:white; padding:22px max(22px,calc((100vw - 1180px)/2)); display:flex; align-items:center; justify-content:space-between; gap:20px; }
+    header h1 { font-size:21px; line-height:1.2; margin:0; letter-spacing:.01em; }
+    header p { margin:5px 0 0; color:#c9ddd6; font-size:13px; }
+    .brand-mark { display:flex; align-items:center; gap:13px; }
+    .mark { height:40px; width:40px; display:grid; place-items:center; border:1px solid #75988d; border-radius:12px; font-weight:800; color:#cce9db; }
+    main { max-width:1180px; margin:28px auto; padding:0 22px 56px; }
+    .topline { display:flex; align-items:center; justify-content:space-between; gap:15px; margin-bottom:18px; }
+    h2 { font-size:20px; margin:0; }
+    .controls { display:flex; flex-wrap:wrap; gap:9px; align-items:center; }
+    select,button { font:inherit; }
+    select { color:var(--ink); background:#fff; border:1px solid #cbd8d3; border-radius:8px; padding:9px 32px 9px 11px; }
+    button { cursor:pointer; border:0; border-radius:8px; padding:9px 13px; font-weight:650; transition:background .15s ease,transform .15s ease; }
+    button:hover { transform:translateY(-1px); }
+    button:focus-visible,select:focus-visible { outline:3px solid #f2b36d; outline-offset:2px; }
+    .primary { background:var(--green); color:white; }
+    .secondary { color:var(--green-dark); background:#e6efeb; }
+    .danger { color:var(--red); background:#f8e9e6; }
+    .metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:20px; }
+    .metric { background:white; border:1px solid var(--line); border-radius:12px; padding:15px 17px; }
+    .metric span { display:block; color:var(--muted); font-size:12px; font-weight:650; text-transform:uppercase; letter-spacing:.06em; }
+    .metric strong { display:block; margin-top:5px; font-size:25px; line-height:1.1; }
+    #notice { display:none; margin:0 0 15px; padding:11px 14px; border-radius:8px; }
+    #notice.error { display:block; color:#7b2727; background:#fae7e4; }
+    #notice.info { display:block; color:#28594a; background:#e3f1e9; }
+    #report-list { display:grid; gap:13px; }
+    .report { background:white; border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+    .report-main { display:grid; grid-template-columns:minmax(0,1fr) auto; gap:16px; padding:17px 19px; }
+    .refline { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:6px; }
+    .reference { color:var(--green-dark); font-weight:750; }
+    .badge { border-radius:999px; padding:3px 9px; font-size:11px; line-height:1.5; font-weight:750; text-transform:uppercase; letter-spacing:.035em; background:#edf1ef; color:#455651; }
+    .badge.reported { background:#fff1dc; color:#87521c; }
+    .badge.assigned { background:#e9e7fb; color:#514898; }
+    .badge.in_progress { background:#deeffb; color:#245a7e; }
+    .badge.resolved { background:#e0f2e7; color:#2b6a44; }
+    .badge.cancelled { background:#f8e5e5; color:#8c3939; }
+    .badge.demo { background:#edf1ef; color:#53635f; }
+    .report h3 { font-size:16px; margin:0 0 5px; }
+    .summary { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+    .details { color:var(--muted); display:flex; flex-wrap:wrap; column-gap:18px; row-gap:3px; font-size:13px; margin-top:9px; }
+    .details strong { color:#42534e; font-weight:650; }
+    .action { min-width:235px; display:flex; flex-direction:column; justify-content:center; align-items:stretch; gap:8px; }
+    .action select { width:100%; }
+    .action button { width:100%; }
+    details { border-top:1px solid #edf1ef; padding:0 19px; color:var(--muted); font-size:13px; }
+    details summary { cursor:pointer; padding:10px 0; color:#40544e; font-weight:650; }
+    .history { padding:0 0 12px 18px; margin:0; }
+    .history li { padding:2px 0; }
+    .cluster-section { margin:0 0 24px; }
+    .cluster-card { background:#fffdf8; border:1px solid #e8d9ba; border-radius:12px; padding:15px 17px; margin-top:10px; }
+    .cluster-head { display:flex; align-items:flex-start; justify-content:space-between; gap:15px; }
+    .cluster-head h3 { margin:0 0 3px; font-size:15px; }
+    .cluster-reports { margin:10px 0 0; padding-left:20px; color:#53635f; font-size:13px; }
+    .cluster-actions { display:flex; gap:8px; margin-top:12px; }
+    .cluster-status { color:#765922; font-size:12px; font-weight:700; text-transform:uppercase; }
+    .empty { text-align:center; color:var(--muted); background:white; border:1px dashed #cbd8d3; padding:45px 20px; border-radius:12px; }
+    .footnote { color:var(--muted); font-size:12px; margin-top:17px; }
+    @media (max-width:760px) {
+      header { padding:18px 20px; }
+      main { margin-top:20px; padding:0 14px 36px; }
+      .topline { align-items:flex-start; flex-direction:column; }
+      .metrics { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+      .metric { padding:12px 13px; }
+      .report-main { grid-template-columns:1fr; padding:15px; }
+      .action { min-width:0; border-top:1px solid #edf1ef; padding-top:12px; }
+      details { padding:0 15px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand-mark"><div class="mark" aria-hidden="true">MW</div><div><h1>MtaaniWatch</h1><p>Coordinator workspace · Mombasa</p></div></div>
+    <span class="badge demo">Prototype · Demo records</span>
+  </header>
+  <main>
+    <div class="topline">
+      <div><h2>Incident reports</h2><div class="footnote" style="margin-top:3px">Review reports and record crew response.</div></div>
+      <div class="controls">
+        <label for="status-filter" class="footnote" style="margin:0">Show</label>
+        <select id="status-filter" aria-label="Filter reports by task status">
+          <option value="all">All statuses</option><option value="reported">Reported</option><option value="assigned">Assigned</option><option value="in_progress">In progress</option><option value="resolved">Resolved</option><option value="cancelled">Cancelled</option>
+        </select>
+        <button class="secondary" id="refresh">Refresh</button>
+      </div>
+    </div>
+    <section class="metrics" aria-label="Report totals">
+      <div class="metric"><span>Open reports</span><strong id="open-count">—</strong></div>
+      <div class="metric"><span>Awaiting assignment</span><strong id="reported-count">—</strong></div>
+      <div class="metric"><span>In progress</span><strong id="progress-count">—</strong></div>
+      <div class="metric"><span>Resolved</span><strong id="resolved-count">—</strong></div>
+    </section>
+    <div id="notice" role="status" aria-live="polite"></div>
+    <section class="cluster-section" aria-labelledby="cluster-heading">
+      <div class="topline" style="margin-bottom:8px">
+        <div><h2 id="cluster-heading">Possible incident clusters</h2><div class="footnote" style="margin-top:3px">Same category and area. Review these suggestions; they are not verified incidents.</div></div>
+        <button class="secondary" id="suggest-clusters">Find possible clusters</button>
+      </div>
+      <div id="cluster-list"><div class="empty" style="padding:20px">Loading suggestions…</div></div>
+    </section>
+    <section id="report-list" aria-live="polite"><div class="empty">Loading reports…</div></section>
+    <p class="footnote">Reports marked unverified need coordinator review. Demo data and crews are illustrative and do not represent a live county dispatch service. Refreshes automatically every 30 seconds.</p>
+  </main>
+  <script>
+    const list = document.querySelector('#report-list');
+    const clusterList = document.querySelector('#cluster-list');
+    const notice = document.querySelector('#notice');
+    const filter = document.querySelector('#status-filter');
+    let reports = [], tasks = [], crews = [], clusters = [];
+    const labels = {reported:'Reported', assigned:'Assigned', in_progress:'In progress', resolved:'Resolved', cancelled:'Cancelled'};
+    const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
+    const date = value => value ? new Date(value).toLocaleString([], {dateStyle:'medium',timeStyle:'short'}) : '—';
+    const showNotice = (message, kind='info') => { notice.className=kind; notice.textContent=message; };
+
+    function updateMetrics() {
+      const counts = Object.fromEntries(Object.keys(labels).map(status => [status, tasks.filter(task => task.status === status).length]));
+      document.querySelector('#open-count').textContent = counts.reported + counts.assigned + counts.in_progress;
+      document.querySelector('#reported-count').textContent = counts.reported;
+      document.querySelector('#progress-count').textContent = counts.in_progress;
+      document.querySelector('#resolved-count').textContent = counts.resolved;
+    }
+
+    function actionMarkup(task) {
+      if (task.status === 'reported') {
+        const options = crews.map(crew => `<option value="${esc(crew.name)}">${esc(crew.name)}</option>`).join('');
+        return `<select aria-label="Choose crew for ${esc(task.report.reference)}" data-crew="${task.id}"><option value="">Assign a crew…</option>${options}</select><button class="primary" data-action="assign" data-task="${task.id}">Assign crew</button><button class="danger" data-action="cancel" data-task="${task.id}">Cancel duplicate / invalid report</button>`;
+      }
+      if (task.status === 'assigned') return `<div class="footnote" style="margin:0 0 2px">Assigned to <strong>${esc(task.crew_name || 'crew')}</strong></div><button class="primary" data-action="in_progress" data-task="${task.id}">Mark in progress</button>`;
+      if (task.status === 'in_progress') return `<div class="footnote" style="margin:0 0 2px">Assigned to <strong>${esc(task.crew_name || 'crew')}</strong></div><button class="primary" data-action="resolved" data-task="${task.id}">Mark resolved</button>`;
+      return `<div class="footnote" style="margin:0">${task.status === 'resolved' ? 'This task is marked resolved.' : 'This report was cancelled.'}</div>`;
+    }
+
+    function render() {
+      updateMetrics();
+      renderClusters();
+      const taskByReport = new Map(tasks.map(task => [task.report_id, task]));
+      const visible = reports.filter(report => filter.value === 'all' || taskByReport.get(report.id)?.status === filter.value);
+      if (!visible.length) { list.innerHTML='<div class="empty">No reports match this filter.</div>'; return; }
+      list.innerHTML = visible.map(report => {
+        const task = taskByReport.get(report.id);
+        if (!task) return '';
+        const impact = Array.isArray(report.impact_reported) ? report.impact_reported.join(', ') : '';
+        const history = task.history.map(item => `<li><strong>${esc(labels[item.status] || item.status)}</strong> · ${esc(date(item.created_at))}${item.note ? ` · ${esc(item.note)}` : ''}</li>`).join('');
+        const smsEvent = [...task.history].reverse().find(item => /acknowledgment|resolution sms/i.test(item.note || ''));
+        const smsNote = smsEvent?.note || '';
+        const smsBadge = /simulated mode/i.test(smsNote)
+          ? '<span class="badge demo">SMS simulated</span>'
+          : /accepted by Africa's Talking/i.test(smsNote)
+            ? '<span class="badge resolved">SMS accepted · delivery unconfirmed</span>'
+            : /provider send failed/i.test(smsNote)
+              ? '<span class="badge reported">SMS failed · simulated</span>' : '';
+        return `<article class="report">
+          <div class="report-main">
+            <div>
+              <div class="refline"><span class="reference">${esc(report.reference)}</span><span class="badge ${esc(task.status)}">${esc(labels[task.status] || task.status)}</span>${report.is_demo ? '<span class="badge demo">Demo</span>' : ''}${report.verified ? '<span class="badge resolved">Verified</span>' : '<span class="badge reported">Unverified</span>'}${smsBadge}</div>
+              <h3>${esc(report.category.replaceAll('_',' '))}${report.area ? ` · ${esc(report.area)}` : ''}</h3>
+              <p class="summary">${esc(report.summary)}</p>
+              <div class="details">${report.landmark ? `<span><strong>Landmark:</strong> ${esc(report.landmark)}</span>` : ''}${impact ? `<span><strong>Reported impact:</strong> ${esc(impact)}</span>` : ''}<span><strong>Source:</strong> ${esc(report.source)}</span><span><strong>Received:</strong> ${esc(date(report.created_at))}</span></div>
+            </div>
+            <div class="action">${actionMarkup(task)}</div>
+          </div>
+          <details><summary>Status history (${task.history.length})</summary><ol class="history">${history || '<li>No status changes recorded.</li>'}</ol></details>
+        </article>`;
+      }).join('');
+    }
+
+    function renderClusters() {
+      if (!clusters.length) { clusterList.innerHTML='<div class="empty" style="padding:20px">No cluster suggestions yet. Select “Find possible clusters” to scan active reports.</div>'; return; }
+      clusterList.innerHTML = clusters.map(cluster => {
+        const members = cluster.reports.map(report => `<li><strong>${esc(report.reference)}</strong> · ${esc(report.summary)}</li>`).join('');
+        const controls = cluster.status === 'suggested'
+          ? `<div class="cluster-actions"><button class="primary" data-cluster-action="accepted" data-cluster="${cluster.id}">Accept suggestion</button><button class="danger" data-cluster-action="dismissed" data-cluster="${cluster.id}">Dismiss</button></div>`
+          : `<div class="cluster-actions"><span class="cluster-status">${esc(cluster.status)} by coordinator</span>${cluster.review_note ? `<span class="footnote" style="margin:0">${esc(cluster.review_note)}</span>` : ''}</div>`;
+        return `<article class="cluster-card"><div class="cluster-head"><div><h3>${esc(cluster.category.replaceAll('_',' '))} · ${esc(cluster.area_name)}</h3><span class="footnote" style="margin:0">${cluster.reports.length} active reports · possible grouping only</span></div><span class="badge ${cluster.status === 'suggested' ? 'reported' : 'demo'}">${esc(cluster.status)}</span></div><ul class="cluster-reports">${members}</ul>${controls}</article>`;
+      }).join('');
+    }
+
+    async function load(showError=true) {
+      try {
+        const responses = await Promise.all([fetch('/reports'), fetch('/tasks'), fetch('/crews'), fetch('/clusters')]);
+        if (responses.some(response => !response.ok)) throw new Error('Could not load dashboard data. Check that the API and database are available.');
+        [reports, tasks, crews, clusters] = await Promise.all(responses.map(response => response.json()));
+        render();
+        if (showError) showNotice(`Loaded ${reports.length} report(s), ${tasks.length} task(s), and ${crews.length} crew(s).`);
+      } catch (error) {
+        if (showError) showNotice(error.message || 'Could not load dashboard data.', 'error');
+        if (!reports.length) list.innerHTML='<div class="empty">Dashboard data is unavailable. Check the API connection and try Refresh.</div>';
+      }
+    }
+
+    async function updateTask(taskId, path, body) {
+      const response = await fetch(`/tasks/${taskId}/${path}`, {method:path === 'assign' ? 'POST' : 'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+      if (!response.ok) { let message='Task update failed.'; try { message=(await response.json()).detail || message; } catch {} throw new Error(message); }
+      await load(false);
+      showNotice('Task updated. The status history has been refreshed.');
+    }
+
+    list.addEventListener('click', async event => {
+      const button = event.target.closest('button[data-action]');
+      if (!button) return;
+      button.disabled=true;
+      try {
+        const taskId=Number(button.dataset.task), action=button.dataset.action;
+        if (action === 'assign') {
+          const crew=list.querySelector(`[data-crew="${taskId}"]`).value;
+          if (!crew) throw new Error('Choose a crew before assigning the task.');
+          await updateTask(taskId,'assign',{crew_name:crew});
+        } else {
+          const status=action === 'cancel' ? 'cancelled' : action;
+          await updateTask(taskId,'status',{status,note:action === 'cancel' ? 'Cancelled by coordinator' : null});
+        }
+      } catch (error) { showNotice(error.message || 'Task update failed.','error'); button.disabled=false; }
+    });
+    clusterList.addEventListener('click', async event => {
+      const button = event.target.closest('button[data-cluster-action]');
+      if (!button) return;
+      button.disabled=true;
+      try {
+        const response=await fetch(`/clusters/${button.dataset.cluster}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({status:button.dataset.clusterAction,note:button.dataset.clusterAction === 'accepted' ? 'Coordinator accepted suggestion for review.' : 'Coordinator dismissed suggestion.'})});
+        if (!response.ok) { let message='Cluster review failed.'; try { message=(await response.json()).detail || message; } catch {} throw new Error(message); }
+        await load(false);
+        showNotice('Cluster suggestion review recorded.');
+      } catch (error) { showNotice(error.message || 'Cluster review failed.','error'); button.disabled=false; }
+    });
+    document.querySelector('#suggest-clusters').addEventListener('click', async event => {
+      const button=event.currentTarget;
+      button.disabled=true;
+      try {
+        const response=await fetch('/clusters/suggest',{method:'POST'});
+        if (!response.ok) throw new Error('Could not scan reports for cluster suggestions.');
+        const result=await response.json();
+        await load(false);
+        showNotice(result.created ? `Created ${result.created} possible cluster suggestion(s).` : 'No new cluster suggestions found.');
+      } catch (error) { showNotice(error.message || 'Cluster scan failed.','error'); }
+      finally { button.disabled=false; }
+    });
+    document.querySelector('#refresh').addEventListener('click', () => load());
+    filter.addEventListener('change', render);
+    load();
+    setInterval(() => load(false), 30000);
+  </script>
+</body>
+</html>
