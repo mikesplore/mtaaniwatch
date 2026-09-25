@@ -68,6 +68,60 @@ Build a focused, reliable demo of the complete report-to-resolution loop for dra
 
 **Implementation status:** Resident confirmation and resolution messages use the report language. The originating SMS `linkId` is retained for later premium replies. Task history and the dashboard show whether SMS was accepted by Africa's Talking or simulated after missing credentials, recipient, or provider failure. Seeded data remains visibly labeled, and [DEMO_RUNBOOK.md](DEMO_RUNBOOK.md) contains the Swahili/English rehearsal and seeded-data recovery steps. Sandbox API acceptance does not verify handset delivery; confirm that separately through a delivery report or resident-side check.
 
+## Targeted fix plan — restore a clear coordinator workflow
+
+The dashboard currently has reports without response tasks, and task/cluster behavior is not obvious to coordinators. Complete these phases in order; each phase should leave the app usable before the next begins.
+
+### Phase A — Recover reports that have no task
+
+- Keep task creation available from report details, without requiring the report to be verified first.
+- Add a bulk recovery action for legacy reports with no task; create one `reported` task and initial history event per report, safely on repeat requests.
+- Make the migration/backfill path explicit for existing deployments so the task count does not depend on whether a report was created through the newest intake code.
+- Keep report verification as a separate review decision, not a prerequisite to starting response work.
+
+**Checkpoint:** A report with no task can receive one from the UI; repeated clicks or retries do not create duplicate tasks. Existing taskless rows can be recovered in bulk and appear in the Tasks view.
+
+**Implementation status:** The report details drawer can create a task without verification, and the Tasks page can backfill every taskless report. The per-report unique constraint plus conflict recovery makes repeated and concurrent creation requests safe. No schema migration is needed for this phase.
+
+### Phase B — Make report triage understandable
+
+- Show each report's review state and response state as separate fields in the report list and details view.
+- Explain the next action for each state: verify/correct details, create or assign a task, or record why the report is out of scope.
+- Ensure task status filters include taskless reports or label them clearly, so filtering does not make reports disappear.
+- Record coordinator actions in task/report history with timestamps and notes.
+
+**Checkpoint:** A coordinator can tell whether a report is verified, has a task, and what action is available without opening unrelated screens.
+
+### Phase C — Make cluster suggestions reflect reports
+
+- Discover clusters from reports with a known area and active status, even if a task has not yet been created. Exclude reports whose tasks are resolved or cancelled.
+- Keep the current exact category/area match as the initial rule; show the matched area, category, report count, and a short reason for each suggestion.
+- Prevent duplicate and stale suggestions when new reports arrive or members become resolved/cancelled. Define whether existing suggestions are refreshed or replaced and preserve coordinator decisions.
+- Explain that a cluster means “possibly the same incident” and requires human review.
+
+**Checkpoint:** The seeded pairs produce suggestions with both taskful and taskless reports; resolving/cancelling members does not leave misleading active suggestions or create duplicate cards.
+
+### Phase D — Add triage and location correction
+
+- Allow a coordinator to correct a report's area/category or flag its location as unknown/uncertain.
+- Add an out-of-scope or duplicate disposition with a reason, actor, and timestamp; keep this separate from task cancellation and cluster dismissal.
+- Require valid area/category values for clustering and explain when a report is excluded due to missing location.
+
+**Checkpoint:** Incorrect or incomplete reports can be corrected or closed with a visible reason and audit history; cluster eligibility is clear.
+
+### Phase E — Improve operational visibility and safeguards
+
+- Surface failed intake processing, SMS delivery outcomes, and background-worker health in logs or an operator-facing status area.
+- Make demo/live provenance clear for reports and notifications.
+- Make task creation and cluster generation safe under concurrent requests; enforce one task per report and prevent duplicate suggestions at the database level.
+- Add backend and frontend coverage for recovery, state transitions, cluster eligibility, and duplicate requests.
+
+**Checkpoint:** Operators can diagnose a stuck report or notification, and repeated/concurrent actions preserve one consistent report/task/cluster state.
+
+### Suggested delivery order
+
+Ship Phases A–C first to restore the coordinator's core report-to-response path. Follow with Phase D for data quality, then Phase E for production-style safeguards and visibility. Keep nearby-area clustering deferred until trusted locality adjacency data is available.
+
 ## Two-day sequencing
 
 ### Day 1 — Make the core loop work

@@ -10,7 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from app.config import settings
-from app.models import Area, Report, SmsIntakeSession, Task, TaskStatus, TaskStatusHistory
+from app.models import Area, ProcessedInboundMessage, Report, SmsIntakeSession, Task, TaskStatus, TaskStatusHistory
 
 
 logger = logging.getLogger(__name__)
@@ -242,17 +242,30 @@ def process_inbound_sms(fields: dict[str, str], db: Session) -> None:
         logger.warning("Ignoring inbound SMS without sender or message")
         return
 
+    message_key = f"{fields.get('channel', 'sms')}:{message_id}" if message_id else None
+
     # Serialize concurrent webhook/poller deliveries for a sender, including the
     # first message when no SmsIntakeSession row exists yet.
     db.execute(
         text("SELECT pg_advisory_xact_lock(0, hashtext(:sender_phone))"),
         {"sender_phone": phone},
     )
+    # Claim the provider ID after obtaining the per-sender transaction lock.
+    # The claim remains in the same transaction as the intake update.
+    if message_key:
+        claimed = db.execute(
+            text(
+                "INSERT INTO processed_inbound_messages (message_key, processed_at) "
+                "VALUES (:message_key, CURRENT_TIMESTAMP) ON CONFLICT (message_key) DO NOTHING"
+            ),
+            {"message_key": message_key},
+        )
+        if claimed.rowcount == 0:
+            db.rollback()
+            return
     session = db.scalar(
         select(SmsIntakeSession).where(SmsIntakeSession.sender_phone == phone).with_for_update()
     )
-    if session and message_id and session.last_message_id == message_id:
-        return
     if session and fields.get("channel") == "voice":
         # A completed recording starts a fresh report conversation for this
         # resident instead of being interpreted as an SMS correction.
@@ -272,6 +285,7 @@ def process_inbound_sms(fields: dict[str, str], db: Session) -> None:
                 reply = "Kutuma ripoti mpya, eleza tatizo la mifereji/mafuriko na eneo au alama ya karibu."
             else:
                 reply = "To start a report, describe a drainage or flooding issue and its area or nearby landmark."
+            db.commit()
             _send(phone, reply, link_id)
             return
         candidate = extract_report(message, area_names)
@@ -283,6 +297,7 @@ def process_inbound_sms(fields: dict[str, str], db: Session) -> None:
                 if candidate.language.casefold().startswith("sw")
                 else "This demo currently accepts drainage and flood-risk reports. Please describe the issue and its Mombasa area."
             )
+            db.commit()
             _send(
                 phone,
                 reply,

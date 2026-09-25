@@ -77,6 +77,10 @@ class TaskRead(BaseModel):
     history: list[TaskStatusHistoryRead]
 
 
+class TaskBackfillResult(BaseModel):
+    created: int
+
+
 class ClusterReportRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

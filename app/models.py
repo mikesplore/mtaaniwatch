@@ -151,6 +151,13 @@ class SmsIntakeSession(Base):
     )
 
 
+class ProcessedInboundMessage(Base):
+    __tablename__ = "processed_inbound_messages"
+
+    message_key: Mapped[str] = mapped_column(String(180), primary_key=True)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class SmsPollCursor(Base):
     __tablename__ = "sms_poll_cursors"
 

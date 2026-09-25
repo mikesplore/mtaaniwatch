@@ -139,6 +139,8 @@ The backend uses FastAPI, PostgreSQL, SQLAlchemy, and Alembic. Configure the loc
 
 Open the coordinator dashboard at `/dashboard`. It displays reports and task history, supports crew assignment and status changes, and lets coordinators review possible incident clusters. Use **Find possible clusters** to group active reports that share a category and area. Groups remain suggestions until accepted or dismissed by a coordinator. When a task is resolved, the backend sends a resident SMS when possible and records whether Africa's Talking accepted it or the update was simulated. API acceptance does not confirm handset delivery.
 
+For reports that do not yet have a response task, open the report details and choose **Create response task**, or use the bulk recovery button in **Tasks** to create tasks for all taskless reports. Verification is a separate coordinator action and is not required to start response work.
+
 Follow [DEMO_RUNBOOK.md](DEMO_RUNBOOK.md) to start the backend and SMS worker and rehearse the Swahili/English resident flow through task resolution.
 
 The seed data includes a separate `Kongowea` area as well as other Mombasa localities. Re-run the idempotent seed command below to add missing demo reference data without duplicating the seeded reports.

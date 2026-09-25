@@ -8,7 +8,7 @@ from xml.sax.saxutils import escape, quoteattr
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -34,6 +34,7 @@ from app.schemas import (
     ReportRead,
     ReportVerificationUpdate,
     TaskAssign,
+    TaskBackfillResult,
     TaskRead,
     TaskStatusUpdate,
 )
@@ -243,6 +244,62 @@ def get_report(reference: str, db: Session = Depends(get_db)) -> Report:
     return report
 
 
+@app.post("/reports/{reference}/task", response_model=TaskRead, status_code=201, tags=["tasks"])
+def create_report_task(
+    reference: str, response: Response, db: Session = Depends(get_db)
+) -> Task:
+    report = db.query(Report).filter(Report.reference == reference).first()
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    existing = db.query(Task).filter(Task.report_id == report.id).first()
+    if existing is not None:
+        response.status_code = 200
+        return existing
+    task = _new_report_task(report, "Response task created by coordinator")
+    db.add(task)
+    try:
+        db.commit()
+    except IntegrityError:
+        # The unique task.report_id constraint makes concurrent retries safe.
+        db.rollback()
+        existing = db.query(Task).filter(Task.report_id == report.id).first()
+        if existing is not None:
+            response.status_code = 200
+            return existing
+        raise
+    db.refresh(task)
+    return task
+
+
+def _new_report_task(report: Report, note: str) -> Task:
+    task = Task(report=report, status=TaskStatus.REPORTED)
+    task.history.append(TaskStatusHistory(status=TaskStatus.REPORTED, note=note))
+    return task
+
+
+@app.post("/tasks/backfill", response_model=TaskBackfillResult, tags=["tasks"])
+def backfill_report_tasks(db: Session = Depends(get_db)) -> TaskBackfillResult:
+    reports = (
+        db.query(Report)
+        .outerjoin(Task, Task.report_id == Report.id)
+        .filter(Task.id.is_(None))
+        .order_by(Report.id)
+        .all()
+    )
+    created = 0
+    for report in reports:
+        try:
+            with db.begin_nested():
+                db.add(_new_report_task(report, "Response task recovered by coordinator"))
+                db.flush()
+            created += 1
+        except IntegrityError:
+            # Another request created this report's task after the query.
+            continue
+    db.commit()
+    return TaskBackfillResult(created=created)
+
+
 @app.patch("/reports/{reference}/verification", response_model=ReportRead, tags=["reports"])
 def update_report_verification(
     reference: str, payload: ReportVerificationUpdate, db: Session = Depends(get_db)
@@ -269,10 +326,11 @@ def list_tasks(db: Session = Depends(get_db)) -> list[Task]:
 def suggest_incident_clusters(db: Session = Depends(get_db)) -> ClusterSuggestionResult:
     active_reports = (
         db.query(Report)
-        .join(Task, Task.report_id == Report.id)
+        .outerjoin(Task, Task.report_id == Report.id)
         .filter(
             Report.area_id.is_not(None),
-            Task.status.in_([TaskStatus.REPORTED, TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS]),
+            (Task.id.is_(None))
+            | Task.status.in_([TaskStatus.REPORTED, TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS]),
         )
         .all()
     )
