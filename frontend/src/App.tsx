@@ -4,7 +4,8 @@ import './App.css'
 type Report = {
   id: number; reference: string; category: string; area: string | null; landmark: string | null
   impact_reported: string[]; summary: string; language: string | null; source: string
-  verified: boolean; is_demo: boolean; created_at: string
+  verified: boolean; is_demo: boolean; disposition: string | null; disposition_reason: string | null
+  disposition_actor: string | null; disposition_at: string | null; created_at: string
 }
 type TaskStatus = 'reported' | 'assigned' | 'in_progress' | 'resolved' | 'cancelled'
 type Task = { id: number; report_id: number; crew_name: string | null; status: TaskStatus; updated_at: string; history: { status: TaskStatus; note: string | null; created_at: string }[] }
@@ -62,6 +63,7 @@ function App() {
   const [notice, setNotice] = useState('')
   const [busy, setBusy] = useState<number | null>(null)
   const [selectedReport, setSelectedReport] = useState<Report | null>(null)
+  const [dispositionReason, setDispositionReason] = useState('')
   const [fetchedAt, setFetchedAt] = useState<Date | null>(null)
 
   const loadData = useCallback(async () => {
@@ -96,7 +98,8 @@ function App() {
   const filteredReports = reports.filter((report) => {
     const task = taskByReport.get(report.id)
     const matchesQuery = `${report.reference} ${report.area ?? ''} ${report.landmark ?? ''} ${report.summary}`.toLowerCase().includes(query.toLowerCase())
-    const matchesStatus = filter === 'all' || task?.status === filter
+    // A selected response status should not hide reports that have no task yet.
+    const matchesStatus = filter === 'all' || task === undefined || task.status === filter
     const matchesArea = areaFilter === 'all' || report.area === areaFilter
     return matchesQuery && matchesStatus && matchesArea
   })
@@ -158,6 +161,18 @@ function App() {
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not recover response tasks.') }
     finally { setBusy(null) }
   }
+  const disposeReport = async (report: Report) => {
+    const reason = dispositionReason.trim()
+    if (reason.length < 3) { setError('Enter a reason of at least 3 characters.'); return }
+    setBusy(report.id); setError(''); setNotice('')
+    try {
+      const updated = await api<Report>(`/reports/${report.reference}/disposition`, { method: 'PATCH', body: JSON.stringify({ disposition: 'out_of_scope', reason }) })
+      setReports((current) => current.map((item) => item.id === updated.id ? updated : item))
+      setSelectedReport(updated); setDispositionReason('')
+      setNotice(`${report.reference} marked out of scope.`)
+    } catch (reasonError) { setError(reasonError instanceof Error ? reasonError.message : 'Could not record report disposition.') }
+    finally { setBusy(null) }
+  }
 
   const pageTitle = section === 'overview' ? 'Operations overview' : section === 'reports' ? 'Reports' : section === 'tasks' ? 'Response tasks' : 'Possible clusters'
 
@@ -185,15 +200,17 @@ function App() {
           </>}
           <section className="panel report-panel">
             <div className="table-toolbar"><label className="search-box"><Icon name="search" size={17}/><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search reports, areas, landmarks..."/></label><div className="toolbar-controls"><select value={filter} onChange={(event) => setFilter(event.target.value)} aria-label="Filter by status"><option value="all">All statuses</option>{Object.entries(statusLabel).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select><select value={areaFilter} onChange={(event) => setAreaFilter(event.target.value)} aria-label="Filter by area"><option value="all">All areas</option>{areas.map((area) => <option key={area} value={area}>{area}</option>)}</select><button className="button button-filter" onClick={() => { setQuery(''); setFilter('all'); setAreaFilter('all') }}>Clear</button></div></div>
-            <div className="table-scroll"><table><thead><tr><th>REPORT</th><th>LOCATION</th><th>ISSUE SUMMARY</th><th>STATUS</th><th>RECEIVED</th><th/></tr></thead><tbody>
+            <div className="table-scroll"><table><thead><tr><th>REPORT</th><th>LOCATION</th><th>ISSUE SUMMARY</th><th>REVIEW</th><th>RESPONSE</th><th>RECEIVED</th><th/></tr></thead><tbody>
               {filteredReports.slice(0, section === 'overview' ? 6 : undefined).map((report) => { const task = taskByReport.get(report.id); return <tr key={report.id}>
                 <td><div className="reference-cell"><span className="report-symbol"><Icon name="report" size={16}/></span><div><strong>{report.reference}</strong><small>{categoryLabel(report.category)}</small></div></div></td>
                 <td><div className="location-cell"><strong>{report.area || 'Area unknown'}</strong><small><Icon name="pin" size={13}/>{report.landmark || 'No landmark provided'}</small></div></td>
-                <td><div className="summary-cell">{report.summary}<div className="source-meta"><span>{report.source.replaceAll('_', ' ')}</span><span>·</span><span>{report.language?.toUpperCase() || '—'}</span>{!report.verified && <span className="unverified-tag">Unverified</span>}</div></div></td>
-                <td><StatusBadge status={task?.status || 'reported'}/></td><td className="time-cell" title={new Date(report.created_at).toLocaleString()}>{timeAgo(report.created_at)}</td><td><button className="row-open" onClick={() => setSelectedReport(report)}>Details</button></td>
+                <td><div className="summary-cell">{report.summary}<div className="source-meta"><span>{report.source.replaceAll('_', ' ')}</span><span>·</span><span>{report.language?.toUpperCase() || '—'}</span></div></div></td>
+                <td>{report.disposition ? <span className="disposition-badge">Out of scope</span> : <span className={`verification-badge ${report.verified ? 'verified' : 'unverified'}`}>{report.verified ? 'Verified' : 'Needs review'}</span>}</td>
+                <td>{task ? <StatusBadge status={task.status}/> : <span className="task-missing">No task · create one in details</span>}</td>
+                <td className="time-cell" title={new Date(report.created_at).toLocaleString()}>{timeAgo(report.created_at)}</td><td><button className="row-open" onClick={() => setSelectedReport(report)}>Details</button></td>
               </tr> })}
-              {!loading && filteredReports.length === 0 && <tr><td colSpan={6}><div className="empty-state"><span>⌕</span><strong>No reports found</strong><small>Try changing your search or filters.</small></div></td></tr>}
-              {loading && <tr><td colSpan={6}><div className="loading-state">Loading reports…</div></td></tr>}
+              {!loading && filteredReports.length === 0 && <tr><td colSpan={7}><div className="empty-state"><span>⌕</span><strong>No reports found</strong><small>Try changing your search or filters.</small></div></td></tr>}
+              {loading && <tr><td colSpan={7}><div className="loading-state">Loading reports…</div></td></tr>}
             </tbody></table></div>
             {filteredReports.length > 6 && section === 'overview' && <button className="table-footer" onClick={() => setSection('reports')}>View all {filteredReports.length} reports <Icon name="arrow" size={15}/></button>}
           </section>
@@ -207,7 +224,7 @@ function App() {
         <footer className="page-footer"><span>◉ MtaaniWatch <i>·</i> Coordinator workspace</span><span>Reports remain unverified until confirmed</span></footer>
       </div>
     </main>
-    {selectedReport && <ReportDetails report={selectedReport} task={taskByReport.get(selectedReport.id)} busy={busy === selectedReport.id} onVerify={() => void verifyReport(selectedReport)} onCreateTask={() => void createReportTask(selectedReport)} onClose={() => setSelectedReport(null)}/>}
+    {selectedReport && <ReportDetails report={selectedReport} task={taskByReport.get(selectedReport.id)} busy={busy === selectedReport.id} dispositionReason={dispositionReason} onDispositionReasonChange={setDispositionReason} onDisposition={() => void disposeReport(selectedReport)} onVerify={() => void verifyReport(selectedReport)} onCreateTask={() => void createReportTask(selectedReport)} onClose={() => setSelectedReport(null)}/>}
   </div>
 }
 
@@ -215,7 +232,7 @@ function StatusBadge({ status }: { status: TaskStatus }) {
   return <span className={`status-badge ${status}`}><i/>{statusLabel[status]}</span>
 }
 
-function ReportDetails({ report, task, busy, onVerify, onCreateTask, onClose }: { report: Report; task?: Task; busy: boolean; onVerify: () => void; onCreateTask: () => void; onClose: () => void }) {
+function ReportDetails({ report, task, busy, dispositionReason, onDispositionReasonChange, onDisposition, onVerify, onCreateTask, onClose }: { report: Report; task?: Task; busy: boolean; dispositionReason: string; onDispositionReasonChange: (reason: string) => void; onDisposition: () => void; onVerify: () => void; onCreateTask: () => void; onClose: () => void }) {
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
     window.addEventListener('keydown', closeOnEscape)
@@ -225,13 +242,15 @@ function ReportDetails({ report, task, busy, onVerify, onCreateTask, onClose }: 
     <aside className="report-drawer" role="dialog" aria-modal="true" aria-labelledby="report-drawer-title">
       <div className="drawer-top"><div><span className="eyebrow">REPORT DETAILS</span><h2 id="report-drawer-title">{report.reference}</h2></div><button className="drawer-close" onClick={onClose} aria-label="Close report details">×</button></div>
       <div className="drawer-scroll">
-        <div className="drawer-badges"><StatusBadge status={task?.status || 'reported'}/><span className={`verification-badge ${report.verified ? 'verified' : 'unverified'}`}>{report.verified ? 'Verified' : 'Needs review'}</span></div>
+        <div className="drawer-badges">{report.disposition ? <span className="disposition-badge">Out of scope</span> : <span className={`verification-badge ${report.verified ? 'verified' : 'unverified'}`}>{report.verified ? 'Verified' : 'Needs review'}</span>}{task ? <StatusBadge status={task.status}/> : <span className="task-missing">No response task</span>}</div>
+        <section className="drawer-section next-action"><h3>{report.disposition ? 'Disposition recorded' : 'Next action'}</h3><p>{report.disposition ? `Out of scope: ${report.disposition_reason} Recorded by ${report.disposition_actor || 'coordinator'}${report.disposition_at ? ` on ${new Date(report.disposition_at).toLocaleString()}` : ''}.` : `${!report.verified ? 'Review the report details and verify them when confirmed.' : 'Report details are verified.'} ${!task ? 'Create a response task to assign a crew and track the work.' : task.status === 'reported' ? 'Assign a crew to begin the response.' : task.status === 'assigned' ? 'Start the response when the crew begins work.' : task.status === 'in_progress' ? 'Mark resolved when the issue is addressed.' : task.status === 'resolved' ? 'Response is complete.' : 'Task was cancelled.'}`}</p></section>
         <section className="drawer-section"><h3>What was reported</h3><p className="drawer-summary">{report.summary}</p>{report.impact_reported.length > 0 && <><h4>Reported impact</h4><ul className="impact-list">{report.impact_reported.map((impact, index) => <li key={`${impact}-${index}`}>{impact}</li>)}</ul></>}</section>
         <section className="drawer-section"><h3>Location</h3><div className="drawer-location"><span className="drawer-pin"><Icon name="pin" size={17}/></span><div><strong>{report.area || 'Area not identified'}</strong><small>{report.landmark || 'No nearby landmark provided'}</small></div></div></section>
         <section className="drawer-section"><h3>Report information</h3><dl className="detail-grid"><div><dt>Category</dt><dd>{categoryLabel(report.category)}</dd></div><div><dt>Received via</dt><dd>{report.source.replaceAll('_', ' ')}</dd></div><div><dt>Language</dt><dd>{report.language?.toUpperCase() || 'Not identified'}</dd></div><div><dt>Received</dt><dd>{new Date(report.created_at).toLocaleString()}</dd></div><div><dt>Assigned crew</dt><dd>{task?.crew_name || 'Unassigned'}</dd></div></dl></section>
         <section className="drawer-section"><h3>Response history</h3>{task?.history.length ? <div className="timeline">{task.history.map((event, index) => <div className="timeline-event" key={`${event.status}-${event.created_at}-${index}`}><span className={`timeline-node ${event.status}`}/><div><strong>{statusLabel[event.status]}</strong><small>{event.note || 'Status updated'}</small><time>{new Date(event.created_at).toLocaleString()}</time></div></div>)}</div> : <p className="no-history">No response history available.</p>}</section>
+        {!report.disposition && <section className="drawer-section disposition-form"><h3>Close report as out of scope</h3><label htmlFor="disposition-reason">Reason (required)</label><textarea id="disposition-reason" value={dispositionReason} onChange={(event) => onDispositionReasonChange(event.target.value)} maxLength={500} placeholder="Explain why this report is outside the response scope."/><button className="button button-filter" onClick={onDisposition} disabled={busy || dispositionReason.trim().length < 3}>Record out-of-scope decision</button></section>}
       </div>
-      <div className="drawer-footer">{!task && <button className="button button-primary" onClick={onCreateTask} disabled={busy}>{busy ? 'Saving…' : <><Icon name="task" size={15}/> Create response task</>}</button>}{!report.verified && <button className="button button-primary" onClick={onVerify} disabled={busy}>{busy ? 'Saving…' : <><Icon name="check" size={15}/> Mark as verified</>}</button>}<button className="button button-filter" onClick={onClose}>Close</button></div>
+      <div className="drawer-footer">{!report.disposition && !task && <button className="button button-primary" onClick={onCreateTask} disabled={busy}>{busy ? 'Saving…' : <><Icon name="task" size={15}/> Create response task</>}</button>}{!report.disposition && !report.verified && <button className="button button-primary" onClick={onVerify} disabled={busy}>{busy ? 'Saving…' : <><Icon name="check" size={15}/> Mark as verified</>}</button>}<button className="button button-filter" onClick={onClose}>Close</button></div>
     </aside>
   </div>
 }

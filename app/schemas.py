@@ -23,11 +23,20 @@ class ReportRead(ReportCreate):
     id: int
     reference: str
     verified: bool
+    disposition: str | None
+    disposition_reason: str | None
+    disposition_actor: str | None
+    disposition_at: datetime | None
     created_at: datetime
 
 
 class ReportVerificationUpdate(BaseModel):
     verified: bool
+
+
+class ReportDispositionUpdate(BaseModel):
+    disposition: str = "out_of_scope"
+    reason: str = Field(min_length=3, max_length=500)
 
 
 class AreaRead(BaseModel):

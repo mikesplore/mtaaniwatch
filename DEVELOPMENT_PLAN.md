@@ -85,12 +85,14 @@ The dashboard currently has reports without response tasks, and task/cluster beh
 
 ### Phase B — Make report triage understandable
 
+**Implementation status:** The reports table now shows verification/disposition and response states separately; taskless reports remain visible under response status filters; report details explain the next coordinator action; and coordinators can record an auditable out-of-scope decision with a required reason. Coordinator task actions already create timestamped history; verification stays independent of response work.
+
 - Show each report's review state and response state as separate fields in the report list and details view.
 - Explain the next action for each state: verify/correct details, create or assign a task, or record why the report is out of scope.
 - Ensure task status filters include taskless reports or label them clearly, so filtering does not make reports disappear.
-- Record coordinator actions in task/report history with timestamps and notes.
+- Keep task actions in timestamped task history; store report verification as its own review decision and out-of-scope decisions with reason, actor, and timestamp.
 
-**Checkpoint:** A coordinator can tell whether a report is verified, has a task, and what action is available without opening unrelated screens.
+**Checkpoint:** A coordinator can tell whether a report is verified, has a task, and what action is available without opening unrelated screens. A report can be marked out of scope with a recorded reason, actor, and timestamp; this disposition remains separate from task cancellation.
 
 ### Phase C — Make cluster suggestions reflect reports
 

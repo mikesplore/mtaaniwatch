@@ -31,6 +31,7 @@ from app.schemas import (
     CrewRead,
     IncidentClusterRead,
     ReportCreate,
+    ReportDispositionUpdate,
     ReportRead,
     ReportVerificationUpdate,
     TaskAssign,
@@ -308,6 +309,26 @@ def update_report_verification(
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
     report.verified = payload.verified
+    db.commit()
+    db.refresh(report)
+    return report
+
+
+@app.patch("/reports/{reference}/disposition", response_model=ReportRead, tags=["reports"])
+def update_report_disposition(
+    reference: str, payload: ReportDispositionUpdate, db: Session = Depends(get_db)
+) -> Report:
+    report = db.query(Report).filter(Report.reference == reference).first()
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    if payload.disposition != "out_of_scope":
+        raise HTTPException(status_code=422, detail="Unsupported report disposition")
+    if report.disposition is not None:
+        raise HTTPException(status_code=409, detail="This report already has a disposition")
+    report.disposition = payload.disposition
+    report.disposition_reason = payload.reason
+    report.disposition_actor = "Operations Admin"
+    report.disposition_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(report)
     return report

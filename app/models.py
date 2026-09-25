@@ -70,6 +70,10 @@ class Report(Base):
     sms_link_id: Mapped[str | None] = mapped_column(String(120), nullable=True)
     is_demo: Mapped[bool] = mapped_column(Boolean, default=False)
     verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    disposition: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    disposition_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    disposition_actor: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    disposition_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     area_ref: Mapped[Area | None] = relationship()
