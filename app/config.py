@@ -12,6 +12,8 @@ class Settings(BaseSettings):
     database_password: str | None = None
     groq_api_key: str | None = None
     groq_model: str = "llama-3.3-70b-versatile"
+    groq_stt_model: str = "whisper-large-v3-turbo"
+    at_public_base_url: str | None = None
     at_username: str = "sandbox"
     at_api_key: str | None = None
     at_sender_id: str | None = None

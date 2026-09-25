@@ -26,6 +26,10 @@ class ReportRead(ReportCreate):
     created_at: datetime
 
 
+class ReportVerificationUpdate(BaseModel):
+    verified: bool
+
+
 class AreaRead(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

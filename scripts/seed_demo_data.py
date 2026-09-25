@@ -154,7 +154,41 @@ REPORTS = [
         "summary": "Drain blocked by sand and waste near the ferry approach.",
         "language": "sw", "source": "sms", "verified": False,
         "created": "2026-09-24 13:00:00", "status": "reported", "crew": None, "history": [],
-    }
+    },
+    # Active same-category reports in the same areas let coordinators try
+    # possible-cluster suggestions immediately after loading demo data.
+    {
+        "reference": "MW-2026-011", "category": "drainage_flooding", "area": "Kongowea",
+        "landmark": "Kongowea Primary School gate",
+        "impact": "Water pooling across the road and slowing matatus.",
+        "summary": "Plastic waste and silt have blocked the roadside drain; rainwater is pooling on the road.",
+        "language": "en", "source": "sms", "verified": False,
+        "created": "2026-09-24 13:25:00", "status": "reported", "crew": None, "history": [],
+    },
+    {
+        "reference": "MW-2026-012", "category": "drainage_flooding", "area": "Kongowea",
+        "landmark": "Kongowea Market main entrance",
+        "impact": "Maji yanafurika kwenye njia ya kuingia sokoni hata mvua ikiwa kidogo.",
+        "summary": "Mfereji ulioziba karibu na soko unasababisha maji ya mvua kumwagika barabarani.",
+        "language": "sw", "source": "whatsapp", "verified": False,
+        "created": "2026-09-24 13:42:00", "status": "reported", "crew": None, "history": [],
+    },
+    {
+        "reference": "MW-2026-013", "category": "drainage_flooding", "area": "Tononoka",
+        "landmark": "Majengo Road opposite Tononoka Social Hall",
+        "impact": "Dirty water is spilling onto the road near shops.",
+        "summary": "The roadside drainage trench is blocked with plastic waste and silt, putting nearby shops at risk of flooding.",
+        "language": "en", "source": "sms", "verified": False,
+        "created": "2026-09-24 13:33:00", "status": "reported", "crew": None, "history": [],
+    },
+    {
+        "reference": "MW-2026-014", "category": "drainage_flooding", "area": "Tononoka",
+        "landmark": "Tononoka Social Hall entrance",
+        "impact": "Maji ya mvua yanafunika njia ya watembea kwa miguu nje ya ukumbi.",
+        "summary": "Tope na takataka zimeziba mtaro karibu na Tononoka Social Hall na maji yanakusanyika barabarani.",
+        "language": "sw", "source": "whatsapp", "verified": False,
+        "created": "2026-09-24 13:51:00", "status": "reported", "crew": None, "history": [],
+    },
 ]
 
 

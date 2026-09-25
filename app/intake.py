@@ -253,6 +253,10 @@ def process_inbound_sms(fields: dict[str, str], db: Session) -> None:
     )
     if session and message_id and session.last_message_id == message_id:
         return
+    if session and fields.get("channel") == "voice":
+        # A completed recording starts a fresh report conversation for this
+        # resident instead of being interpreted as an SMS correction.
+        session.stage = "completed"
 
     area_names = list(db.scalars(select(Area.name).order_by(Area.name)))
     yes = message.casefold() in {"yes", "y", "ok", "okay", "ndio", "ndiyo", "sawa", "ndio sawa"}
@@ -271,6 +275,8 @@ def process_inbound_sms(fields: dict[str, str], db: Session) -> None:
             _send(phone, reply, link_id)
             return
         candidate = extract_report(message, area_names)
+        if fields.get("channel") == "voice" and fields.get("language") in {"en", "sw"}:
+            candidate.language = fields["language"]
         if candidate.category == "other":
             reply = (
                 "Kwa sasa tunapokea ripoti zinazohusu mifereji au hatari ya mafuriko. Tafadhali eleza tatizo na eneo lake la Mombasa."
@@ -309,7 +315,7 @@ def process_inbound_sms(fields: dict[str, str], db: Session) -> None:
             impact_reported=candidate.impact_reported,
             summary=candidate.summary,
             language=candidate.language,
-            source="sms",
+            source="voice_call" if fields.get("channel") == "voice" else "sms",
             resident_phone=phone,
             sms_link_id=link_id,
             is_demo=True,
@@ -322,7 +328,8 @@ def process_inbound_sms(fields: dict[str, str], db: Session) -> None:
         report.reference = f"MW-{report.id:06d}"
         task = Task(report=report, status=TaskStatus.REPORTED)
         acknowledgment_event = TaskStatusHistory(
-            status=TaskStatus.REPORTED, note="Resident confirmed SMS report"
+            status=TaskStatus.REPORTED,
+            note=f"Resident confirmed {('voice' if fields.get('channel') == 'voice' else 'SMS')} report",
         )
         task.history.append(acknowledgment_event)
         db.add(task)

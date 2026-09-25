@@ -2,9 +2,12 @@ import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlencode
+from xml.sax.saxutils import escape, quoteattr
 
-from fastapi import Depends, FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -29,15 +32,20 @@ from app.schemas import (
     IncidentClusterRead,
     ReportCreate,
     ReportRead,
+    ReportVerificationUpdate,
     TaskAssign,
     TaskRead,
     TaskStatusUpdate,
 )
+from app.voice import transcribe_voice_report
 
 
 app = FastAPI(title=settings.app_name, version="0.1.0")
 logger = logging.getLogger(__name__)
-DASHBOARD_FILE = Path(__file__).parent / "static" / "dashboard.html"
+FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
+FRONTEND_INDEX = FRONTEND_DIST / "index.html"
+if (FRONTEND_DIST / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=FRONTEND_DIST / "assets"), name="frontend-assets")
 
 
 @app.get("/", include_in_schema=False)
@@ -47,7 +55,9 @@ def home() -> RedirectResponse:
 
 @app.get("/dashboard", response_class=FileResponse, tags=["coordinator dashboard"])
 def coordinator_dashboard() -> FileResponse:
-    return FileResponse(DASHBOARD_FILE, media_type="text/html")
+    if FRONTEND_INDEX.is_file():
+        return FileResponse(FRONTEND_INDEX, media_type="text/html")
+    return FileResponse(Path(__file__).parent / "static" / "dashboard.html", media_type="text/html")
 
 
 @app.post("/webhooks/africastalking/sms", response_class=PlainTextResponse, tags=["resident intake"])
@@ -68,6 +78,116 @@ async def africastalking_sms_webhook(
     )
     process_inbound_sms(fields, db)
     return PlainTextResponse("Received")
+
+
+def _check_voice_webhook_token(request: Request) -> None:
+    if settings.at_webhook_token and request.query_params.get("token") != settings.at_webhook_token:
+        raise HTTPException(status_code=403, detail="Invalid webhook token")
+
+
+def _voice_callback_url(request: Request, path: str, **query: str) -> str:
+    base_url = (settings.at_public_base_url or str(request.base_url)).rstrip("/")
+    if settings.at_webhook_token:
+        query["token"] = settings.at_webhook_token
+    return f"{base_url}{path}?{urlencode(query)}" if query else f"{base_url}{path}"
+
+
+def _voice_xml(body: str) -> Response:
+    return Response(
+        content=f'<?xml version="1.0" encoding="UTF-8"?><Response>{body}</Response>',
+        media_type="application/xml",
+    )
+
+
+def _voice_language_menu(request: Request, retry: int = 0) -> Response:
+    callback_url = _voice_callback_url(
+        request, "/webhooks/africastalking/voice/language", retry=str(retry)
+    )
+    prompt = (
+        "Welcome to MtaaniWatch. This call may be recorded and transcribed to prepare your report. "
+        "Press 1 for English, or press 2 for Kiswahili. "
+        "Karibu MtaaniWatch. Piga 1 kwa Kiingereza au 2 kwa Kiswahili."
+    )
+    return _voice_xml(
+        f"<GetDigits numDigits=\"1\" timeout=\"12\" finishOnKey=\"#\" callbackUrl={quoteattr(callback_url)}>"
+        f"<Say>{escape(prompt)}</Say></GetDigits>"
+        "<Say>We did not receive a selection. Goodbye.</Say>"
+    )
+
+
+@app.post("/webhooks/africastalking/voice", tags=["resident voice intake"])
+async def africastalking_voice_webhook(request: Request) -> Response:
+    _check_voice_webhook_token(request)
+    fields = parse_callback(await request.body())
+    caller = fields.get("callerNumber", "")
+    session_id = fields.get("sessionId", "missing")
+    masked_caller = f"***{caller[-4:]}" if caller else "missing"
+    logger.info("Africa's Talking Voice call received: caller=%s session=%s", masked_caller, session_id)
+    return _voice_language_menu(request)
+
+
+@app.post("/webhooks/africastalking/voice/language", tags=["resident voice intake"])
+async def africastalking_voice_language(request: Request) -> Response:
+    _check_voice_webhook_token(request)
+    fields = parse_callback(await request.body())
+    digit = fields.get("dtmfDigits", "").strip()
+    language = {"1": "en", "2": "sw"}.get(digit)
+    if language is None:
+        retry = int(request.query_params.get("retry", "0"))
+        if retry < 1:
+            return _voice_language_menu(request, retry=retry + 1)
+        return _voice_xml("<Say>We did not receive a valid choice. Goodbye.</Say>")
+
+    callback_url = _voice_callback_url(
+        request, "/webhooks/africastalking/voice/recording", language=language
+    )
+    prompt = (
+        "After the beep, describe the drainage or flooding problem and give its Mombasa area or a nearby landmark. "
+        "Press the hash key when you are done. You have up to 45 seconds."
+        if language == "en"
+        else "Baada ya mlio, eleza tatizo la mfereji au mafuriko na utaje eneo la Mombasa au alama ya karibu. "
+        "Bonyeza alama ya reli ukimaliza. Una sekunde 45."
+    )
+    logger.info("Voice caller selected language=%s", language)
+    return _voice_xml(
+        f"<Say>{escape(prompt)}</Say>"
+        f"<Record finishOnKey=\"#\" maxLength=\"45\" timeout=\"8\" trimSilence=\"true\" "
+        f"playBeep=\"true\" callbackUrl={quoteattr(callback_url)}/>"
+    )
+
+
+@app.post("/webhooks/africastalking/voice/recording", tags=["resident voice intake"])
+async def africastalking_voice_recording(
+    request: Request, background_tasks: BackgroundTasks
+) -> Response:
+    _check_voice_webhook_token(request)
+    fields = parse_callback(await request.body())
+    phone = fields.get("callerNumber", "").strip()
+    session_id = fields.get("sessionId", "").strip()
+    recording_url = fields.get("recordingUrl") or fields.get("recordingURL") or fields.get("recording_url", "")
+    language = request.query_params.get("language", "en")
+    if language not in {"en", "sw"}:
+        language = "en"
+    masked_caller = f"***{phone[-4:]}" if phone else "missing"
+    if not phone or not session_id or not recording_url:
+        logger.warning(
+            "Voice recording callback missing required data: caller=%s session_present=%s recording_present=%s",
+            masked_caller,
+            bool(session_id),
+            bool(recording_url),
+        )
+        closing = "Hatukuweza kupokea ujumbe wako. Tafadhali jaribu tena." if language == "sw" else "We could not receive your recording. Please try again."
+        return _voice_xml(f"<Say>{escape(closing)}</Say>")
+
+    logger.info("Voice recording received: caller=%s session=%s", masked_caller, session_id)
+    background_tasks.add_task(transcribe_voice_report, phone, session_id, recording_url, language)
+    closing = (
+        "Asante. Tumepokea ujumbe wako. Tutakutumia SMS ili uthibitishe maelezo ya ripoti yako. "
+        "Unaweza kukata simu sasa."
+        if language == "sw"
+        else "Thank you. We received your report. We will text you to confirm its details. You may hang up now."
+    )
+    return _voice_xml(f"<Say>{escape(closing)}</Say>")
 
 
 @app.get("/health", tags=["health"])
@@ -120,6 +240,19 @@ def get_report(reference: str, db: Session = Depends(get_db)) -> Report:
     report = db.query(Report).filter(Report.reference == reference).first()
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
+    return report
+
+
+@app.patch("/reports/{reference}/verification", response_model=ReportRead, tags=["reports"])
+def update_report_verification(
+    reference: str, payload: ReportVerificationUpdate, db: Session = Depends(get_db)
+) -> Report:
+    report = db.query(Report).filter(Report.reference == reference).first()
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    report.verified = payload.verified
+    db.commit()
+    db.refresh(report)
     return report
 
 
