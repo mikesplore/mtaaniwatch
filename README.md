@@ -143,14 +143,14 @@ The Africa's Talking inbound SMS callback is `/webhooks/africastalking/sms`. Con
 
 For voice intake, configure an Africa's Talking Virtual Voice Number callback to `https://admin.mikesplore.me/webhooks/africastalking/voice`. Set `AT_PUBLIC_BASE_URL=https://admin.mikesplore.me` so keypad and recording callbacks use the public tunnel URL. Set `AT_WEBHOOK_TOKEN` and register the initial Voice callback with `?token=<value>`; the app carries that token into follow-up callbacks. The caller selects English or Kiswahili, consents to recording, and describes the drainage/flood issue. Africa's Talking posts the recording URL to `/webhooks/africastalking/voice/recording`; Groq Whisper transcribes it and the report enters the normal SMS confirmation flow. This uses one transcription request and one report-extraction request per recorded report. Configure `GROQ_STT_MODEL` to select the speech-to-text model. Voice Sandbox interactions are through Africa's Talking Simulator, not a handset.
 
-If inbound callbacks are unavailable, run the inbox poller in a second terminal after applying migrations:
+Use one inbound SMS transport at a time. Prefer the Africa's Talking **Incoming Messages** callback above; run the inbox poller only when that callback is unavailable, since polling the same inbox alongside callbacks can produce duplicate replies if the provider omits or changes message IDs. To use polling, run it in a second terminal after applying migrations:
 
 ```bash
 rtk .venv/bin/alembic upgrade head
 rtk .venv/bin/python -m scripts.poll_sms --interval 20
 ```
 
-On its first start, the poller records the current latest inbox message ID and skips existing Sandbox test messages. It then processes new messages and stores its cursor in PostgreSQL, so restarts do not replay already handled messages. Keep the poller running while testing; stop it with `Ctrl+C`.
+On its first start, the poller records the current latest inbox message ID and skips existing Sandbox test messages. It then processes new messages and stores its cursor in PostgreSQL, so restarts do not replay already handled messages. Keep it running while using polling; stop it with `Ctrl+C` before switching back to callback intake.
 
 After changing SQLAlchemy models, create a migration and review it before applying:
 

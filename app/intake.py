@@ -239,7 +239,10 @@ def process_inbound_sms(fields: dict[str, str], db: Session) -> None:
     message_id = fields.get("id") or fields.get("messageId")
     link_id = fields.get("linkId") or fields.get("link_id")
     if not phone or not message:
-        logger.warning("Ignoring inbound SMS without sender or message")
+        logger.warning(
+            "Ignoring inbound SMS without sender or message (available fields: %s)",
+            sorted(fields),
+        )
         return
 
     message_key = f"{fields.get('channel', 'sms')}:{message_id}" if message_id else None

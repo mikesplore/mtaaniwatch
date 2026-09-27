@@ -123,7 +123,7 @@ def _voice_language_menu(request: Request, retry: int = 0) -> Response:
         "Karibu MtaaniWatch. Piga 1 kwa Kiingereza au 2 kwa Kiswahili."
     )
     return _voice_xml(
-        f"<GetDigits numDigits=\"1\" timeout=\"12\" finishOnKey=\"#\" callbackUrl={quoteattr(callback_url)}>"
+        f"<GetDigits numDigits=\"1\" timeout=\"12\" finishOnKey=\"#\" callBackUrl={quoteattr(callback_url)}>"
         f"<Say>{escape(prompt)}</Say></GetDigits>"
         "<Say>We did not receive a selection. Goodbye.</Say>"
     )
@@ -166,7 +166,7 @@ async def africastalking_voice_language(request: Request) -> Response:
     return _voice_xml(
         f"<Say>{escape(prompt)}</Say>"
         f"<Record finishOnKey=\"#\" maxLength=\"45\" timeout=\"8\" trimSilence=\"true\" "
-        f"playBeep=\"true\" callbackUrl={quoteattr(callback_url)}/>"
+        f"playBeep=\"true\" callBackUrl={quoteattr(callback_url)}/>"
     )
 
 
