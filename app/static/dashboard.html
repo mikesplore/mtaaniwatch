@@ -180,7 +180,7 @@
         const controls = cluster.status === 'suggested'
           ? `<div class="cluster-actions"><button class="primary" data-cluster-action="accepted" data-cluster="${cluster.id}">Accept suggestion</button><button class="danger" data-cluster-action="dismissed" data-cluster="${cluster.id}">Dismiss</button></div>`
           : `<div class="cluster-actions"><span class="cluster-status">${esc(cluster.status)} by coordinator</span>${cluster.review_note ? `<span class="footnote" style="margin:0">${esc(cluster.review_note)}</span>` : ''}</div>`;
-        return `<article class="cluster-card"><div class="cluster-head"><div><h3>${esc(cluster.category.replaceAll('_',' '))} · ${esc(cluster.area_name)}</h3><span class="footnote" style="margin:0">${cluster.reports.length} active reports · possible grouping only</span></div><span class="badge ${cluster.status === 'suggested' ? 'reported' : 'demo'}">${esc(cluster.status)}</span></div><ul class="cluster-reports">${members}</ul>${controls}</article>`;
+        return `<article class="cluster-card"><div class="cluster-head"><div><h3>${esc(cluster.category.replaceAll('_',' '))} · ${esc(cluster.area_name)}</h3><span class="footnote" style="margin:0">${cluster.reports.length} active reports</span><span class="footnote" style="margin:4px 0 0">${esc(cluster.reason || 'Same category and area; coordinator review required.')}</span></div><span class="badge ${cluster.status === 'suggested' ? 'reported' : 'demo'}">${esc(cluster.status)}</span></div><ul class="cluster-reports">${members}</ul>${controls}</article>`;
       }).join('');
     }
 
@@ -239,7 +239,8 @@
         if (!response.ok) throw new Error('Could not scan reports for cluster suggestions.');
         const result=await response.json();
         await load(false);
-        showNotice(result.created ? `Created ${result.created} possible cluster suggestion(s).` : 'No new cluster suggestions found.');
+        const changes = [result.created ? `${result.created} new` : '', result.updated ? `${result.updated} refreshed` : '', result.removed ? `${result.removed} outdated removed` : ''].filter(Boolean);
+        showNotice(changes.length ? `Cluster suggestions: ${changes.join(', ')}.` : 'Cluster suggestions are up to date; no new matches found.');
       } catch (error) { showNotice(error.message || 'Cluster scan failed.','error'); }
       finally { button.disabled=false; }
     });

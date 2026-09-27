@@ -333,8 +333,9 @@ def process_inbound_sms(fields: dict[str, str], db: Session) -> None:
             source="voice_call" if fields.get("channel") == "voice" else "sms",
             resident_phone=phone,
             sms_link_id=link_id,
-            is_demo=True,
+            is_demo=settings.at_username.casefold() == "sandbox",
             verified=False,
+            location_uncertain=False,
         )
         if candidate.area:
             report.area_ref = db.scalar(select(Area).where(Area.name.ilike(candidate.area)))

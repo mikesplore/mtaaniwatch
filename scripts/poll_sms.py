@@ -3,16 +3,33 @@
 import argparse
 import logging
 import time
+from datetime import datetime, timezone
 
 import africastalking
 from app.config import settings
 from app.database import SessionLocal
 from app.intake import process_inbound_sms
-from app.models import SmsPollCursor
+from app.models import SmsPollCursor, WorkerHeartbeat
 
 
 logger = logging.getLogger("mtaaniwatch.sms_poll")
 CURSOR_NAME = "africastalking_inbox"
+WORKER_NAME = "africastalking_sms_poller"
+
+
+def _record_worker_outcome(processed: int | None, error: Exception | None = None) -> None:
+    now = datetime.now(timezone.utc)
+    with SessionLocal() as db:
+        heartbeat = db.get(WorkerHeartbeat, WORKER_NAME)
+        if heartbeat is None:
+            heartbeat = WorkerHeartbeat(name=WORKER_NAME, last_attempt_at=now)
+            db.add(heartbeat)
+        heartbeat.last_attempt_at = now
+        heartbeat.last_error = f"{type(error).__name__}: {error}"[:300] if error else None
+        heartbeat.last_processed_count = processed
+        if error is None:
+            heartbeat.last_success_at = now
+        db.commit()
 
 
 def _messages_after(last_received_id: int) -> list[dict]:
@@ -142,9 +159,14 @@ def main() -> None:
     while True:
         try:
             count = poll_once()
+            _record_worker_outcome(count)
             if count:
                 logger.info("Processed %s new inbound SMS message(s)", count)
-        except Exception:
+        except Exception as exc:
+            try:
+                _record_worker_outcome(None, exc)
+            except Exception:
+                logger.exception("Could not record SMS poller failure heartbeat")
             logger.exception("Inbox poll failed; will retry after the interval")
         time.sleep(args.interval)
 

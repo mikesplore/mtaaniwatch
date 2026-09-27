@@ -272,6 +272,7 @@ def seed() -> None:
                 area_ref=areas[item["area"]], landmark=item["landmark"],
                 impact_reported=[item["impact"]], summary=item["summary"], language=item["language"],
                 source=item["source"], is_demo=True, verified=item["verified"], created_at=dt(item["created"]),
+                location_uncertain=False,
             )
             task_status = TaskStatus(item["status"])
             task = Task(report=report, crew_ref=crews.get(item["crew"]), crew_name=item["crew"],

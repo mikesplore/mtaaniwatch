@@ -1,6 +1,6 @@
 import logging
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlencode
 from xml.sax.saxutils import escape, quoteattr
@@ -16,13 +16,16 @@ from app.database import check_database_connection, get_db
 from app.intake import parse_callback, process_inbound_sms, send_resolution_sms
 from app.models import (
     Area,
+    CLUSTERABLE_REPORT_CATEGORIES,
     ClusterReviewStatus,
     Crew,
     IncidentCluster,
     Report,
+    ReportReviewEvent,
     Task,
     TaskStatus,
     TaskStatusHistory,
+    WorkerHeartbeat,
 )
 from app.schemas import (
     AreaRead,
@@ -33,6 +36,7 @@ from app.schemas import (
     ReportCreate,
     ReportDispositionUpdate,
     ReportRead,
+    ReportTriageUpdate,
     ReportVerificationUpdate,
     TaskAssign,
     TaskBackfillResult,
@@ -78,7 +82,15 @@ async def africastalking_sms_webhook(
         len(fields.get("text", "").strip()),
         fields.get("id") or fields.get("messageId") or "missing",
     )
-    process_inbound_sms(fields, db)
+    try:
+        process_inbound_sms(fields, db)
+    except Exception:
+        logger.exception(
+            "Inbound SMS processing failed: sender=%s message_id=%s",
+            masked_sender,
+            fields.get("id") or fields.get("messageId") or "missing",
+        )
+        raise
     return PlainTextResponse("Received")
 
 
@@ -206,6 +218,28 @@ def readiness() -> dict[str, str]:
     return {"status": "ready", "database": "connected"}
 
 
+@app.get("/operations/health", tags=["operations"])
+def operations_health(db: Session = Depends(get_db)) -> dict[str, object]:
+    heartbeat = db.get(WorkerHeartbeat, "africastalking_sms_poller")
+    if heartbeat is None:
+        status = "not_reported"
+    elif heartbeat.last_error:
+        status = "error"
+    elif datetime.now(timezone.utc) - heartbeat.last_attempt_at > timedelta(seconds=75):
+        status = "stale"
+    else:
+        status = "healthy"
+    return {
+        "sms_poller": {
+            "status": status,
+            "last_attempt_at": heartbeat.last_attempt_at if heartbeat else None,
+            "last_success_at": heartbeat.last_success_at if heartbeat else None,
+            "last_error": heartbeat.last_error if heartbeat else None,
+            "last_processed_count": heartbeat.last_processed_count if heartbeat else None,
+        }
+    }
+
+
 @app.get("/areas", response_model=list[AreaRead], tags=["reference data"])
 def list_areas(db: Session = Depends(get_db)) -> list[Area]:
     return list(db.query(Area).order_by(Area.name).all())
@@ -218,7 +252,7 @@ def list_crews(db: Session = Depends(get_db)) -> list[Crew]:
 
 @app.post("/reports", response_model=ReportRead, status_code=201, tags=["reports"])
 def create_report(payload: ReportCreate, db: Session = Depends(get_db)) -> Report:
-    report = Report(**payload.model_dump(), reference="pending")
+    report = Report(**payload.model_dump(), reference="pending", location_uncertain=False)
     if payload.area:
         report.area_ref = db.query(Area).filter(Area.name.ilike(payload.area)).first()
     db.add(report)
@@ -309,6 +343,13 @@ def update_report_verification(
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
     report.verified = payload.verified
+    report.review_events.append(
+        ReportReviewEvent(
+            action="verification",
+            reason="Report marked verified" if payload.verified else "Report marked unverified",
+            actor="Operations Admin",
+        )
+    )
     db.commit()
     db.refresh(report)
     return report
@@ -321,14 +362,67 @@ def update_report_disposition(
     report = db.query(Report).filter(Report.reference == reference).first()
     if report is None:
         raise HTTPException(status_code=404, detail="Report not found")
-    if payload.disposition != "out_of_scope":
-        raise HTTPException(status_code=422, detail="Unsupported report disposition")
     if report.disposition is not None:
         raise HTTPException(status_code=409, detail="This report already has a disposition")
     report.disposition = payload.disposition
     report.disposition_reason = payload.reason
     report.disposition_actor = "Operations Admin"
     report.disposition_at = datetime.now(timezone.utc)
+    report.review_events.append(
+        ReportReviewEvent(
+            action="disposition",
+            reason=f"{payload.disposition}: {payload.reason}",
+            actor="Operations Admin",
+            details={"disposition": payload.disposition},
+        )
+    )
+    db.commit()
+    db.refresh(report)
+    return report
+
+
+@app.patch("/reports/{reference}/triage", response_model=ReportRead, tags=["reports"])
+def update_report_triage(
+    reference: str, payload: ReportTriageUpdate, db: Session = Depends(get_db)
+) -> Report:
+    report = db.query(Report).filter(Report.reference == reference).first()
+    if report is None:
+        raise HTTPException(status_code=404, detail="Report not found")
+    area = None
+    if payload.area_id is not None:
+        area = db.query(Area).filter(Area.id == payload.area_id).first()
+        if area is None:
+            raise HTTPException(status_code=422, detail="Select a valid area")
+    if area is None and not payload.location_uncertain:
+        raise HTTPException(status_code=422, detail="Mark the location uncertain when no area is selected")
+
+    old_values = {
+        "area": report.area,
+        "category": report.category,
+        "location_uncertain": report.location_uncertain,
+    }
+    report.area_ref = area
+    report.area = area.name if area else None
+    report.category = payload.category
+    report.location_uncertain = payload.location_uncertain
+    report.triage_reason = payload.reason
+    report.triage_actor = "Operations Admin"
+    report.triaged_at = datetime.now(timezone.utc)
+    report.review_events.append(
+        ReportReviewEvent(
+            action="triage",
+            reason=payload.reason,
+            actor="Operations Admin",
+            details={
+                "before": old_values,
+                "after": {
+                    "area": report.area,
+                    "category": report.category,
+                    "location_uncertain": report.location_uncertain,
+                },
+            },
+        )
+    )
     db.commit()
     db.refresh(report)
     return report
@@ -339,17 +433,15 @@ def list_tasks(db: Session = Depends(get_db)) -> list[Task]:
     return list(db.query(Task).order_by(Task.created_at.desc()).all())
 
 
-@app.post(
-    "/clusters/suggest",
-    response_model=ClusterSuggestionResult,
-    tags=["possible incident clusters"],
-)
-def suggest_incident_clusters(db: Session = Depends(get_db)) -> ClusterSuggestionResult:
+def _active_cluster_groups(db: Session) -> dict[tuple[str, int], list[Report]]:
     active_reports = (
         db.query(Report)
         .outerjoin(Task, Task.report_id == Report.id)
         .filter(
             Report.area_id.is_not(None),
+            Report.location_uncertain.is_(False),
+            Report.category.in_(CLUSTERABLE_REPORT_CATEGORIES),
+            Report.disposition.is_(None),
             (Task.id.is_(None))
             | Task.status.in_([TaskStatus.REPORTED, TaskStatus.ASSIGNED, TaskStatus.IN_PROGRESS]),
         )
@@ -358,15 +450,68 @@ def suggest_incident_clusters(db: Session = Depends(get_db)) -> ClusterSuggestio
     groups: dict[tuple[str, int], list[Report]] = defaultdict(list)
     for report in active_reports:
         groups[(report.category, report.area_id)].append(report)
+    eligible_groups = {key: reports for key, reports in groups.items() if len(reports) >= 2}
+    for reports in eligible_groups.values():
+        reports.sort(key=lambda item: item.id)
+    return eligible_groups
+
+
+@app.post(
+    "/clusters/suggest",
+    response_model=ClusterSuggestionResult,
+    tags=["possible incident clusters"],
+)
+def suggest_incident_clusters(db: Session = Depends(get_db)) -> ClusterSuggestionResult:
+    # Serialize suggestion refreshes so concurrent coordinator clicks cannot
+    # create competing snapshots for the same category and area.
+    db.execute(text("SELECT pg_advisory_xact_lock(0, 174821933)"))
+    groups = _active_cluster_groups(db)
+
+    existing_clusters = db.query(IncidentCluster).all()
+    suggested_by_key: dict[tuple[str, int], list[IncidentCluster]] = defaultdict(list)
+    reviewed_fingerprints = {
+        cluster.fingerprint
+        for cluster in existing_clusters
+        if cluster.status != ClusterReviewStatus.SUGGESTED
+    }
+    for cluster in existing_clusters:
+        if cluster.status == ClusterReviewStatus.SUGGESTED:
+            suggested_by_key[(cluster.category, cluster.area_id)].append(cluster)
 
     created = 0
-    for (category, area_id), reports in groups.items():
-        if len(reports) < 2:
+    updated = 0
+    removed = 0
+    for key, suggestions in suggested_by_key.items():
+        candidate = groups.get(key)
+        suggestions.sort(key=lambda cluster: cluster.id)
+        keeper = suggestions[0]
+        for stale_duplicate in suggestions[1:]:
+            db.delete(stale_duplicate)
+            removed += 1
+        if len(suggestions) > 1:
+            db.flush()
+        if candidate is None:
+            db.delete(keeper)
+            removed += 1
             continue
-        reports.sort(key=lambda item: item.id)
+
+        fingerprint = f"{key[0]}:{key[1]}:{','.join(str(item.id) for item in candidate)}"
+        # A coordinator has already decided on this exact set. Keep that
+        # decision and remove any redundant unreviewed copy.
+        if fingerprint in reviewed_fingerprints:
+            db.delete(keeper)
+            removed += 1
+            groups.pop(key, None)
+            continue
+        if keeper.fingerprint != fingerprint:
+            updated += 1
+        keeper.fingerprint = fingerprint
+        keeper.reports = candidate
+        groups.pop(key, None)
+
+    for (category, area_id), reports in groups.items():
         fingerprint = f"{category}:{area_id}:{','.join(str(item.id) for item in reports)}"
-        existing = db.query(IncidentCluster.id).filter(IncidentCluster.fingerprint == fingerprint).first()
-        if existing:
+        if fingerprint in reviewed_fingerprints:
             continue
         db.add(
             IncidentCluster(
@@ -379,13 +524,26 @@ def suggest_incident_clusters(db: Session = Depends(get_db)) -> ClusterSuggestio
         )
         created += 1
 
+    # Flush deletes before inserting refreshed snapshots with the same unique
+    # fingerprint when an obsolete suggestion is replaced by a reviewed state.
+    db.flush()
     db.commit()
-    return ClusterSuggestionResult(created=created)
+    return ClusterSuggestionResult(created=created, updated=updated, removed=removed)
 
 
 @app.get("/clusters", response_model=list[IncidentClusterRead], tags=["possible incident clusters"])
 def list_incident_clusters(db: Session = Depends(get_db)) -> list[IncidentCluster]:
-    return list(db.query(IncidentCluster).order_by(IncidentCluster.created_at.desc()).all())
+    groups = _active_cluster_groups(db)
+    clusters = db.query(IncidentCluster).order_by(IncidentCluster.created_at.desc()).all()
+    visible = []
+    for cluster in clusters:
+        if cluster.status != ClusterReviewStatus.SUGGESTED:
+            visible.append(cluster)
+            continue
+        reports = groups.get((cluster.category, cluster.area_id), [])
+        if [report.id for report in reports] == sorted(report.id for report in cluster.reports):
+            visible.append(cluster)
+    return visible
 
 
 @app.patch(
@@ -403,6 +561,9 @@ def review_incident_cluster(
         raise HTTPException(status_code=422, detail="A suggestion can only be accepted or dismissed")
     if cluster.status != ClusterReviewStatus.SUGGESTED:
         raise HTTPException(status_code=409, detail="This cluster suggestion has already been reviewed")
+    current_reports = _active_cluster_groups(db).get((cluster.category, cluster.area_id), [])
+    if [report.id for report in current_reports] != sorted(report.id for report in cluster.reports):
+        raise HTTPException(status_code=409, detail="This suggestion is stale; find possible clusters again")
 
     cluster.status = payload.status
     cluster.review_note = payload.note

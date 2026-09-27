@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,6 +18,16 @@ class ReportCreate(BaseModel):
     is_demo: bool = False
 
 
+class ReportReviewEventRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    action: str
+    reason: str
+    actor: str
+    details: dict | None
+    created_at: datetime
+
+
 class ReportRead(ReportCreate):
     model_config = ConfigDict(from_attributes=True)
 
@@ -27,6 +38,12 @@ class ReportRead(ReportCreate):
     disposition_reason: str | None
     disposition_actor: str | None
     disposition_at: datetime | None
+    area_id: int | None
+    location_uncertain: bool
+    triage_reason: str | None
+    triage_actor: str | None
+    triaged_at: datetime | None
+    review_events: list[ReportReviewEventRead]
     created_at: datetime
 
 
@@ -35,7 +52,14 @@ class ReportVerificationUpdate(BaseModel):
 
 
 class ReportDispositionUpdate(BaseModel):
-    disposition: str = "out_of_scope"
+    disposition: Literal["out_of_scope", "duplicate"] = "out_of_scope"
+    reason: str = Field(min_length=3, max_length=500)
+
+
+class ReportTriageUpdate(BaseModel):
+    area_id: int | None
+    category: Literal["drainage_flooding", "garbage_collection", "other"]
+    location_uncertain: bool
     reason: str = Field(min_length=3, max_length=500)
 
 
@@ -109,6 +133,7 @@ class IncidentClusterRead(BaseModel):
     id: int
     category: str
     area_name: str
+    reason: str
     status: ClusterReviewStatus
     review_note: str | None
     created_at: datetime
@@ -118,6 +143,8 @@ class IncidentClusterRead(BaseModel):
 
 class ClusterSuggestionResult(BaseModel):
     created: int
+    updated: int = 0
+    removed: int = 0
 
 
 class ClusterReviewUpdate(BaseModel):

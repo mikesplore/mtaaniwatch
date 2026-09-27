@@ -12,6 +12,7 @@ export default defineConfig({
       '/crews': 'http://localhost:8000',
       '/clusters': 'http://localhost:8000',
       '/areas': 'http://localhost:8000',
+      '/operations': 'http://localhost:8000',
     },
   },
 })

@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from enum import StrEnum
 
-from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, JSON, String, Table, Text
+from sqlalchemy import Boolean, Column, DateTime, Enum, ForeignKey, Integer, JSON, String, Table, Text, false
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -23,6 +23,10 @@ class ClusterReviewStatus(StrEnum):
     SUGGESTED = "suggested"
     ACCEPTED = "accepted"
     DISMISSED = "dismissed"
+
+
+REPORT_CATEGORIES = frozenset({"drainage_flooding", "garbage_collection", "other"})
+CLUSTERABLE_REPORT_CATEGORIES = frozenset({"drainage_flooding"})
 
 
 incident_cluster_reports = Table(
@@ -74,6 +78,10 @@ class Report(Base):
     disposition_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
     disposition_actor: Mapped[str | None] = mapped_column(String(120), nullable=True)
     disposition_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    location_uncertain: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    triage_reason: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    triage_actor: Mapped[str | None] = mapped_column(String(120), nullable=True)
+    triaged_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
     area_ref: Mapped[Area | None] = relationship()
@@ -81,6 +89,23 @@ class Report(Base):
     incident_clusters: Mapped[list["IncidentCluster"]] = relationship(
         secondary=incident_cluster_reports, back_populates="reports"
     )
+    review_events: Mapped[list["ReportReviewEvent"]] = relationship(
+        back_populates="report", cascade="all, delete-orphan", order_by="ReportReviewEvent.created_at"
+    )
+
+
+class ReportReviewEvent(Base):
+    __tablename__ = "report_review_events"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    report_id: Mapped[int] = mapped_column(ForeignKey("reports.id"), index=True)
+    action: Mapped[str] = mapped_column(String(32))
+    reason: Mapped[str] = mapped_column(String(500))
+    actor: Mapped[str] = mapped_column(String(120))
+    details: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+    report: Mapped[Report] = relationship(back_populates="review_events")
 
 
 class IncidentCluster(Base):
@@ -106,6 +131,13 @@ class IncidentCluster(Base):
     @property
     def area_name(self) -> str:
         return self.area_ref.name
+
+    @property
+    def reason(self) -> str:
+        return (
+            f"{len(self.reports)} reports share the exact issue category "
+            "and area. This may indicate the same incident; coordinator review is required."
+        )
 
 
 class Task(Base):
@@ -170,3 +202,13 @@ class SmsPollCursor(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
     )
+
+
+class WorkerHeartbeat(Base):
+    __tablename__ = "worker_heartbeats"
+
+    name: Mapped[str] = mapped_column(String(40), primary_key=True)
+    last_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_error: Mapped[str | None] = mapped_column(String(300), nullable=True)
+    last_processed_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

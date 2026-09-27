@@ -96,22 +96,28 @@ The dashboard currently has reports without response tasks, and task/cluster beh
 
 ### Phase C — Make cluster suggestions reflect reports
 
+**Implementation status:** Cluster scans include taskless reports, exclude resolved/cancelled tasks and out-of-scope reports, refresh the current unreviewed suggestion for each category/area, and remove it when fewer than two eligible reports remain. Accepted and dismissed suggestions are retained as coordinator history; the same exact membership is not suggested again. Cards explain the exact-match rule and why the grouping was suggested.
+
 - Discover clusters from reports with a known area and active status, even if a task has not yet been created. Exclude reports whose tasks are resolved or cancelled.
 - Keep the current exact category/area match as the initial rule; show the matched area, category, report count, and a short reason for each suggestion.
 - Prevent duplicate and stale suggestions when new reports arrive or members become resolved/cancelled. Define whether existing suggestions are refreshed or replaced and preserve coordinator decisions.
 - Explain that a cluster means “possibly the same incident” and requires human review.
 
-**Checkpoint:** The seeded pairs produce suggestions with both taskful and taskless reports; resolving/cancelling members does not leave misleading active suggestions or create duplicate cards.
+**Checkpoint:** The seeded pairs produce suggestions with both taskful and taskless reports; resolving/cancelling members removes or refreshes stale suggestions without changing accepted/dismissed decisions or creating duplicate cards.
 
 ### Phase D — Add triage and location correction
+
+**Implementation status:** Coordinators can correct area/category or mark a location uncertain, with a required note and a persistent actor/timestamp history. Dispositions support out-of-scope and duplicate decisions, separate from task status and cluster review. Cluster suggestions only include known, certain areas and the supported drainage/flood-risk category; report details explain exclusion.
 
 - Allow a coordinator to correct a report's area/category or flag its location as unknown/uncertain.
 - Add an out-of-scope or duplicate disposition with a reason, actor, and timestamp; keep this separate from task cancellation and cluster dismissal.
 - Require valid area/category values for clustering and explain when a report is excluded due to missing location.
 
-**Checkpoint:** Incorrect or incomplete reports can be corrected or closed with a visible reason and audit history; cluster eligibility is clear.
+**Checkpoint:** Incorrect or incomplete reports can be corrected or closed with a visible reason and full audit history; cluster eligibility is clear. Apply migration `0009_report_triage` before deploying the coordinator corrections.
 
 ### Phase E — Improve operational visibility and safeguards
+
+**Implementation status:** SMS inbox poll outcomes now persist a heartbeat with last attempt, last success, and error state; the dashboard shows healthy, stale, failed, or unreported worker status. SMS callback failures get a masked-sender error log, outbound delivery outcomes remain recorded in logs/task history, and report rows/details distinguish demo data from non-demo submissions. Existing unique task-per-report and cluster fingerprint constraints, conflict recovery, and serialized cluster refreshes provide duplicate protection. Automated test coverage remains open because the repository currently has no test suite.
 
 - Surface failed intake processing, SMS delivery outcomes, and background-worker health in logs or an operator-facing status area.
 - Make demo/live provenance clear for reports and notifications.
