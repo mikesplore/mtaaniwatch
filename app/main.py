@@ -25,6 +25,7 @@ from app.models import (
     Task,
     TaskStatus,
     TaskStatusHistory,
+    VoiceIntakeSession,
     WorkerHeartbeat,
 )
 from app.schemas import (
@@ -118,12 +119,11 @@ def _voice_language_menu(request: Request, retry: int = 0) -> Response:
         request, "/webhooks/africastalking/voice/language", retry=str(retry)
     )
     prompt = (
-        "Welcome to MtaaniWatch. This call may be recorded and transcribed to prepare your report. "
-        "Press 1 for English, or press 2 for Kiswahili. "
+        "Welcome to MtaaniWatch. Press 1 for English or 2 for Kiswahili."
         "Karibu MtaaniWatch. Piga 1 kwa Kiingereza au 2 kwa Kiswahili."
     )
     return _voice_xml(
-        f"<GetDigits numDigits=\"1\" timeout=\"12\" finishOnKey=\"#\" callBackUrl={quoteattr(callback_url)}>"
+        f"<GetDigits numDigits=\"1\" timeout=\"12\" callbackUrl={quoteattr(callback_url)}>"
         f"<Say>{escape(prompt)}</Say></GetDigits>"
         "<Say>We did not receive a selection. Goodbye.</Say>"
     )
@@ -141,16 +141,58 @@ async def africastalking_voice_webhook(request: Request) -> Response:
 
 
 @app.post("/webhooks/africastalking/voice/language", tags=["resident voice intake"])
-async def africastalking_voice_language(request: Request) -> Response:
+async def africastalking_voice_language(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> Response:
     _check_voice_webhook_token(request)
     fields = parse_callback(await request.body())
-    digit = fields.get("dtmfDigits", "").strip()
+    digit_value = next(
+        (
+            value
+            for key, value in fields.items()
+            if key.casefold() in {"dtmfdigits", "dtmfdigit", "digits"}
+        ),
+        "",
+    )
+    digit = digit_value.strip().removesuffix("#").strip()
     language = {"1": "en", "2": "sw"}.get(digit)
+    recording_url = fields.get("recordingUrl") or fields.get("recordingURL") or fields.get("recording_url", "")
+    if fields.get("callSessionState", "").casefold() == "completed" or recording_url:
+        session_id = fields.get("sessionId", "").strip()
+        session = db.get(VoiceIntakeSession, session_id) if session_id else None
+        if recording_url:
+            response_language = session.language if session else (language or "en")
+            _queue_voice_transcription(fields, recording_url, response_language, background_tasks, db)
+        return PlainTextResponse("Received")
     if language is None:
+        logger.warning(
+            "Voice language callback received no supported selection (fields=%s, dtmf=%r)",
+            sorted(fields),
+            digit_value[:4],
+        )
         retry = int(request.query_params.get("retry", "0"))
         if retry < 1:
             return _voice_language_menu(request, retry=retry + 1)
         return _voice_xml("<Say>We did not receive a valid choice. Goodbye.</Say>")
+
+    session_id = fields.get("sessionId", "").strip()
+    caller_number = fields.get("callerNumber", "").strip()
+    if session_id and caller_number:
+        session = db.get(VoiceIntakeSession, session_id)
+        if session is None:
+            session = VoiceIntakeSession(
+                session_id=session_id,
+                caller_number=caller_number,
+                language=language,
+                recording_processed=False,
+            )
+            db.add(session)
+        else:
+            session.caller_number = caller_number
+            session.language = language
+        db.commit()
 
     callback_url = _voice_callback_url(
         request, "/webhooks/africastalking/voice/recording", language=language
@@ -166,20 +208,21 @@ async def africastalking_voice_language(request: Request) -> Response:
     return _voice_xml(
         f"<Say>{escape(prompt)}</Say>"
         f"<Record finishOnKey=\"#\" maxLength=\"45\" timeout=\"8\" trimSilence=\"true\" "
-        f"playBeep=\"true\" callBackUrl={quoteattr(callback_url)}/>"
+        f"playBeep=\"true\" callbackUrl={quoteattr(callback_url)}/>"
     )
 
 
 @app.post("/webhooks/africastalking/voice/recording", tags=["resident voice intake"])
 async def africastalking_voice_recording(
-    request: Request, background_tasks: BackgroundTasks
+    request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)
 ) -> Response:
     _check_voice_webhook_token(request)
     fields = parse_callback(await request.body())
     phone = fields.get("callerNumber", "").strip()
     session_id = fields.get("sessionId", "").strip()
     recording_url = fields.get("recordingUrl") or fields.get("recordingURL") or fields.get("recording_url", "")
-    language = request.query_params.get("language", "en")
+    session = db.get(VoiceIntakeSession, session_id) if session_id else None
+    language = session.language if session else request.query_params.get("language", "en")
     if language not in {"en", "sw"}:
         language = "en"
     masked_caller = f"***{phone[-4:]}" if phone else "missing"
@@ -193,8 +236,9 @@ async def africastalking_voice_recording(
         closing = "Hatukuweza kupokea ujumbe wako. Tafadhali jaribu tena." if language == "sw" else "We could not receive your recording. Please try again."
         return _voice_xml(f"<Say>{escape(closing)}</Say>")
 
+    if not _queue_voice_transcription(fields, recording_url, language, background_tasks, db):
+        return PlainTextResponse("Received")
     logger.info("Voice recording received: caller=%s session=%s", masked_caller, session_id)
-    background_tasks.add_task(transcribe_voice_report, phone, session_id, recording_url, language)
     closing = (
         "Asante. Tumepokea ujumbe wako. Tutakutumia SMS ili uthibitishe maelezo ya ripoti yako. "
         "Unaweza kukata simu sasa."
@@ -202,6 +246,57 @@ async def africastalking_voice_recording(
         else "Thank you. We received your report. We will text you to confirm its details. You may hang up now."
     )
     return _voice_xml(f"<Say>{escape(closing)}</Say>")
+
+
+def _queue_voice_transcription(
+    fields: dict[str, str],
+    recording_url: str,
+    language: str,
+    background_tasks: BackgroundTasks,
+    db: Session,
+) -> bool:
+    phone = fields.get("callerNumber", "").strip()
+    session_id = fields.get("sessionId", "").strip()
+    if not phone or not session_id or not recording_url:
+        logger.warning("Voice recording callback missing caller, session, or recording URL")
+        return False
+    session = db.get(VoiceIntakeSession, session_id)
+    if session is None:
+        session = VoiceIntakeSession(
+            session_id=session_id,
+            caller_number=phone,
+            language=language if language in {"en", "sw"} else "en",
+            recording_processed=True,
+        )
+        db.add(session)
+        db.commit()
+    else:
+        if session.recording_processed:
+            logger.info("Ignoring duplicate voice recording callback: session=%s", session_id)
+            return False
+        language = session.language
+        session.recording_processed = True
+        db.commit()
+    logger.info("Queueing voice transcription: session=%s language=%s", session_id, language)
+    background_tasks.add_task(transcribe_voice_report, phone, session_id, recording_url, language)
+    return True
+
+
+@app.post("/webhooks/africastalking/voice/events", tags=["resident voice intake"])
+async def africastalking_voice_events(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+) -> PlainTextResponse:
+    _check_voice_webhook_token(request)
+    fields = parse_callback(await request.body())
+    recording_url = fields.get("recordingUrl") or fields.get("recordingURL") or fields.get("recording_url", "")
+    session_id = fields.get("sessionId", "").strip()
+    session = db.get(VoiceIntakeSession, session_id) if session_id else None
+    if recording_url:
+        language = session.language if session else "en"
+        _queue_voice_transcription(fields, recording_url, language, background_tasks, db)
+    return PlainTextResponse("Received")
 
 
 @app.get("/health", tags=["health"])

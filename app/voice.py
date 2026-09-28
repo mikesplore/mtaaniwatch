@@ -11,7 +11,7 @@ from app.intake import process_inbound_sms, send_sms
 
 logger = logging.getLogger(__name__)
 GROQ_TRANSCRIPTION_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
-ALLOWED_RECORDING_DOMAIN = "africastalking.com"
+ALLOWED_RECORDING_DOMAINS = ("africastalking.com", "at-internal.com")
 
 
 def _could_not_process(phone: str, language: str) -> None:
@@ -42,7 +42,10 @@ def transcribe_voice_report(
     if (
         parsed_url.scheme != "https"
         or not hostname
-        or not (hostname == ALLOWED_RECORDING_DOMAIN or hostname.endswith(f".{ALLOWED_RECORDING_DOMAIN}"))
+        or not any(
+            hostname == domain or hostname.endswith(f".{domain}")
+            for domain in ALLOWED_RECORDING_DOMAINS
+        )
         or parsed_url.username
         or parsed_url.password
     ):

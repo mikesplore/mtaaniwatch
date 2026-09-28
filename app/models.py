@@ -187,6 +187,16 @@ class SmsIntakeSession(Base):
     )
 
 
+class VoiceIntakeSession(Base):
+    __tablename__ = "voice_intake_sessions"
+
+    session_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    caller_number: Mapped[str] = mapped_column(String(32))
+    language: Mapped[str] = mapped_column(String(2))
+    recording_processed: Mapped[bool] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class ProcessedInboundMessage(Base):
     __tablename__ = "processed_inbound_messages"
 
