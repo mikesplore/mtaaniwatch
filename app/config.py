@@ -19,6 +19,8 @@ class Settings(BaseSettings):
     at_sender_id: str | None = None
     at_shortcode: str | None = None
     at_webhook_token: str | None = None
+    at_sms_polling_enabled: bool = False
+    at_sms_poll_interval: float = 20.0
 
     model_config = SettingsConfigDict(
         env_file=PROJECT_ROOT / ".env",

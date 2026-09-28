@@ -4,6 +4,7 @@ from typing import Sequence, Union
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 
 revision: str = "0001_initial"
@@ -13,7 +14,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 task_status = sa.Enum(
-    "REPORTED", "ASSIGNED", "IN_PROGRESS", "RESOLVED", name="task_status"
+    "REPORTED", "ASSIGNED", "IN_PROGRESS", "RESOLVED", name="task_status", create_type=False
+)
+task_status_column = postgresql.ENUM(
+    "REPORTED", "ASSIGNED", "IN_PROGRESS", "RESOLVED", name="task_status", create_type=False
 )
 
 
@@ -44,7 +48,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("report_id", sa.Integer(), nullable=False),
         sa.Column("crew_name", sa.String(length=120), nullable=True),
-        sa.Column("status", task_status, nullable=False),
+        sa.Column("status", task_status_column, nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["report_id"], ["reports.id"]),
@@ -55,7 +59,7 @@ def upgrade() -> None:
         "task_status_history",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("task_id", sa.Integer(), nullable=False),
-        sa.Column("status", task_status, nullable=False),
+        sa.Column("status", task_status_column, nullable=False),
         sa.Column("note", sa.String(length=500), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["task_id"], ["tasks.id"]),

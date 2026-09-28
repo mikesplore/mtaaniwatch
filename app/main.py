@@ -1,4 +1,6 @@
 import logging
+import asyncio
+from contextlib import asynccontextmanager
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -47,7 +49,27 @@ from app.schemas import (
 from app.voice import transcribe_voice_report
 
 
-app = FastAPI(title=settings.app_name, version="0.1.0")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    poller_task = None
+    if settings.at_sms_polling_enabled:
+        if settings.at_sms_poll_interval < 1:
+            raise ValueError("AT_SMS_POLL_INTERVAL must be at least 1 second")
+        from scripts.poll_sms import run_poller
+
+        poller_task = asyncio.create_task(run_poller(settings.at_sms_poll_interval))
+    try:
+        yield
+    finally:
+        if poller_task is not None:
+            poller_task.cancel()
+            try:
+                await poller_task
+            except asyncio.CancelledError:
+                pass
+
+
+app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
 logger = logging.getLogger(__name__)
 FRONTEND_DIST = Path(__file__).parent.parent / "frontend" / "dist"
 FRONTEND_INDEX = FRONTEND_DIST / "index.html"

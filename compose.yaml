@@ -1,0 +1,31 @@
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: mtaaniwatchdb
+      POSTGRES_USER: mtaaniwatch
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:-mtaaniwatch}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mtaaniwatch -d mtaaniwatchdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://mtaaniwatch:${DATABASE_PASSWORD:-mtaaniwatch}@db:5432/mtaaniwatchdb
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:-mtaaniwatch}
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+
+volumes:
+  postgres_data:

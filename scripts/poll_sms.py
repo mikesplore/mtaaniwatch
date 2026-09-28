@@ -1,6 +1,7 @@
 """Poll Africa's Talking's SMS inbox when inbound callbacks are unavailable."""
 
 import argparse
+import asyncio
 import logging
 import time
 from datetime import datetime, timezone
@@ -157,18 +158,40 @@ def main() -> None:
     )
 
     while True:
-        try:
-            count = poll_once()
-            _record_worker_outcome(count)
-            if count:
-                logger.info("Processed %s new inbound SMS message(s)", count)
-        except Exception as exc:
-            try:
-                _record_worker_outcome(None, exc)
-            except Exception:
-                logger.exception("Could not record SMS poller failure heartbeat")
-            logger.exception("Inbox poll failed; will retry after the interval")
+        _poll_iteration()
         time.sleep(args.interval)
+
+
+def _poll_iteration() -> None:
+    try:
+        count = poll_once()
+        _record_worker_outcome(count)
+        if count:
+            logger.info("Processed %s new inbound SMS message(s)", count)
+    except Exception as exc:
+        try:
+            _record_worker_outcome(None, exc)
+        except Exception:
+            logger.exception("Could not record SMS poller failure heartbeat")
+        logger.exception("Inbox poll failed; will retry after the interval")
+
+
+async def run_poller(interval: float) -> None:
+    """Poll continuously while the ASGI app is running."""
+    if not settings.at_api_key:
+        logger.error("SMS inbox polling is enabled but AT_API_KEY is not configured")
+        return
+
+    africastalking.initialize(settings.at_username, settings.at_api_key)
+    logger.info("SMS inbox poller started (username=%s, interval=%ss)", settings.at_username, interval)
+    try:
+        while True:
+            # The provider SDK and database work are synchronous; keep them off the event loop.
+            await asyncio.to_thread(_poll_iteration)
+            await asyncio.sleep(interval)
+    except asyncio.CancelledError:
+        logger.info("SMS inbox poller stopped")
+        raise
 
 
 if __name__ == "__main__":
