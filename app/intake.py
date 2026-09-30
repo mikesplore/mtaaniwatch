@@ -57,6 +57,7 @@ def fallback_extract(message: str, area_names: list[str]) -> ExtractedReport:
     drainage_terms = (
         "drain", "gutter", "manhole", "culvert", "waterway", "channel", "storm water",
         "mfereji", "mifereji", "mtaro", "mitaro", "imeziba", "imezibwa", "imejaa",
+        "sewer", "sewage", "sewerage", "wastewater", "raw sewage",
         "blocked", "choked", "overflow", "flood", "flooding", "waterlogged", "standing water",
         "mafuriko", "maji yamesimama", "maji imesimama", "maji imefurika", "hazipiti", "hayapiti",
         "water cannot flow", "water is not flowing", "blocking water", "obstructing water",
@@ -95,7 +96,8 @@ def extract_report(message: str, area_names: list[str]) -> ExtractedReport:
         "When multiple listed areas are mentioned, prefer the one explicitly introduced as the resident's "
         "reporting area (for example, 'from Nyali') over areas mentioned as wards, landmarks, or nearby places. "
         "Return JSON keys category (drainage_flooding for blocked/choked drains, gutters, manholes, culverts, "
-        "or waterways; flooding or standing water; or waste, silt, walls, or other objects obstructing water flow. "
+        "or waterways; flooding or standing water; blocked sewers or sewage/wastewater overflow; "
+        "or waste, silt, walls, or other objects obstructing water flow. "
         "Use other for issues unrelated to drainage or flood risk, such as garbage-only collection, streetlights, "
         "or general road damage), area, landmark, impact_reported "
         "(array of short stated impacts), summary (concise, preserve the specific issue and reported consequences, "
@@ -233,6 +235,17 @@ def send_resolution_sms(report: Report) -> Literal["accepted", "simulated", "fai
     return _send(report.resident_phone, message, report.sms_link_id)
 
 
+def send_in_progress_sms(report: Report) -> Literal["accepted", "simulated", "failed"]:
+    if not report.resident_phone:
+        logger.info("In-progress SMS simulated; report %s has no resident phone number", report.reference)
+        return "simulated"
+    if (report.language or "en").casefold().startswith("sw"):
+        message = f"Jibu limeanza kwa ripoti {report.reference}. Tutakujulisha kazi itakapokamilika."
+    else:
+        message = f"A response has started for report {report.reference}. We will update you when the work is complete."
+    return _send(report.resident_phone, message, report.sms_link_id)
+
+
 def process_inbound_sms(fields: dict[str, str], db: Session) -> None:
     phone = fields.get("from", "").strip()
     message = fields.get("text", "").strip()
@@ -316,13 +329,29 @@ def process_inbound_sms(fields: dict[str, str], db: Session) -> None:
         session.last_message_id = message_id
         reply = confirmation_text(candidate)
     elif session.stage == "awaiting_location":
-        combined = f"{session.original_text}\nLocation clarification: {message}"
-        candidate = extract_report(combined, area_names)
-        session.original_text = combined
-        session.candidate = candidate.model_dump()
-        session.stage = "awaiting_confirmation" if candidate.area else "awaiting_location"
-        session.last_message_id = message_id
-        reply = confirmation_text(candidate)
+        if yes or no:
+            candidate = ExtractedReport.model_validate(session.candidate)
+            session.last_message_id = message_id
+            if candidate.language.casefold().startswith("sw"):
+                reply = "Tafadhali tuma jina la eneo la Mombasa, kama Kisauni. NDIYO pekee haitaji eneo."
+            else:
+                reply = "Please send the Mombasa area, for example Kisauni. YES alone does not identify the location."
+        else:
+            clarified_location = fallback_extract(message, area_names).area
+            candidate = ExtractedReport.model_validate(session.candidate)
+            if clarified_location:
+                candidate.area = clarified_location
+                session.candidate = candidate.model_dump()
+                session.stage = "awaiting_confirmation"
+                reply = confirmation_text(candidate)
+            else:
+                combined = f"{session.original_text}\nLocation clarification: {message}"
+                candidate = extract_report(combined, area_names)
+                session.original_text = combined
+                session.candidate = candidate.model_dump()
+                session.stage = "awaiting_confirmation" if candidate.area else "awaiting_location"
+                reply = confirmation_text(candidate)
+            session.last_message_id = message_id
     elif session.stage == "awaiting_confirmation" and yes:
         candidate = ExtractedReport.model_validate(session.candidate)
         report = Report(

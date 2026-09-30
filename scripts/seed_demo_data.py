@@ -15,6 +15,7 @@ AREAS = [
     ("Miritini", "Residential area along the Mombasa-Nairobi highway."),
     ("Bamburi", "Residential area near the Moi International Sports Complex."),
     ("Changamwe", "High-density residential area, home to Changamwe Hospital."),
+    ("Kisauni", "Residential area around Kisauni Primary School and nearby neighborhoods."),
     ("Mjamboni", "Residential area near Jomvu Industrial Area."),
     ("Magogoni", "Residential area near Changamwe."),
     ("Mshomoroni", "Residential area in the northern mainland."),

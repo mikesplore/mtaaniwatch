@@ -80,7 +80,6 @@
 <body>
   <header>
     <div class="brand-mark"><div class="mark" aria-hidden="true">MW</div><div><h1>MtaaniWatch</h1><p>Coordinator workspace · Mombasa</p></div></div>
-    <span class="badge demo">Prototype · Demo records</span>
   </header>
   <main>
     <div class="topline">
@@ -108,7 +107,7 @@
       <div id="cluster-list"><div class="empty" style="padding:20px">Loading suggestions…</div></div>
     </section>
     <section id="report-list" aria-live="polite"><div class="empty">Loading reports…</div></section>
-    <p class="footnote">Reports marked unverified need coordinator review. Demo data and crews are illustrative and do not represent a live county dispatch service. Refreshes automatically every 30 seconds.</p>
+    <p class="footnote">Reports marked unverified need coordinator review. Refreshes automatically every 30 seconds.</p>
   </main>
   <script>
     const list = document.querySelector('#report-list');
@@ -150,7 +149,7 @@
         if (!task) return '';
         const impact = Array.isArray(report.impact_reported) ? report.impact_reported.join(', ') : '';
         const history = task.history.map(item => `<li><strong>${esc(labels[item.status] || item.status)}</strong> · ${esc(date(item.created_at))}${item.note ? ` · ${esc(item.note)}` : ''}</li>`).join('');
-        const smsEvent = [...task.history].reverse().find(item => /acknowledgment|resolution sms/i.test(item.note || ''));
+        const smsEvent = [...task.history].reverse().find(item => /acknowledgment|in-progress sms|resolution sms/i.test(item.note || ''));
         const smsNote = smsEvent?.note || '';
         const smsBadge = /simulated mode/i.test(smsNote)
           ? '<span class="badge demo">SMS simulated</span>'
@@ -161,7 +160,7 @@
         return `<article class="report">
           <div class="report-main">
             <div>
-              <div class="refline"><span class="reference">${esc(report.reference)}</span><span class="badge ${esc(task.status)}">${esc(labels[task.status] || task.status)}</span>${report.is_demo ? '<span class="badge demo">Demo</span>' : ''}${report.verified ? '<span class="badge resolved">Verified</span>' : '<span class="badge reported">Unverified</span>'}${smsBadge}</div>
+              <div class="refline"><span class="reference">${esc(report.reference)}</span><span class="badge ${esc(task.status)}">${esc(labels[task.status] || task.status)}</span>${report.verified ? '<span class="badge resolved">Verified</span>' : '<span class="badge reported">Unverified</span>'}${smsBadge}</div>
               <h3>${esc(report.category.replaceAll('_',' '))}${report.area ? ` · ${esc(report.area)}` : ''}</h3>
               <p class="summary">${esc(report.summary)}</p>
               <div class="details">${report.landmark ? `<span><strong>Landmark:</strong> ${esc(report.landmark)}</span>` : ''}${impact ? `<span><strong>Reported impact:</strong> ${esc(impact)}</span>` : ''}<span><strong>Source:</strong> ${esc(report.source)}</span><span><strong>Received:</strong> ${esc(date(report.created_at))}</span></div>

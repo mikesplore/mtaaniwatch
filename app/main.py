@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import check_database_connection, get_db
-from app.intake import parse_callback, process_inbound_sms, send_resolution_sms
+from app.intake import parse_callback, process_inbound_sms, send_in_progress_sms, send_resolution_sms
 from app.models import (
     Area,
     CLUSTERABLE_REPORT_CATEGORIES,
@@ -729,14 +729,16 @@ def update_task_status(
     status_event = TaskStatusHistory(status=payload.status, note=payload.note)
     task.history.append(status_event)
     db.commit()
-    if payload.status == TaskStatus.RESOLVED:
-        delivery = send_resolution_sms(task.report)
+    if payload.status in {TaskStatus.IN_PROGRESS, TaskStatus.RESOLVED}:
+        is_resolution = payload.status == TaskStatus.RESOLVED
+        delivery = send_resolution_sms(task.report) if is_resolution else send_in_progress_sms(task.report)
+        update_name = "resolution" if is_resolution else "in-progress"
         if delivery == "accepted":
-            outcome = "resolution SMS accepted by Africa's Talking; handset delivery is unconfirmed"
+            outcome = f"{update_name} SMS accepted by Africa's Talking; handset delivery is unconfirmed"
         elif delivery == "simulated":
-            outcome = "resolution SMS shown in simulated mode; not delivered"
+            outcome = f"{update_name} SMS shown in simulated mode; not delivered"
         else:
-            outcome = "provider send failed; resolution update shown in simulated mode"
+            outcome = f"provider send failed; {update_name} update shown in simulated mode"
         status_event.note = f"{payload.note}. {outcome}" if payload.note else outcome.capitalize()
         db.commit()
     db.refresh(task)

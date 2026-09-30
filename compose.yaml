@@ -25,7 +25,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8000:8000"
+      - "8000:9002"
 
 volumes:
   postgres_data:
