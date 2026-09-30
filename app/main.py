@@ -10,6 +10,7 @@ from xml.sax.saxutils import escape, quoteattr
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -47,6 +48,14 @@ from app.schemas import (
     TaskStatusUpdate,
 )
 from app.voice import transcribe_voice_report
+
+
+# Uvicorn only configures its own loggers, so without this the intake, voice,
+# and poller messages an operator needs never reach the service log.
+logging.basicConfig(
+    level=settings.log_level.upper(),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+)
 
 
 @asynccontextmanager

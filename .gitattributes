@@ -1,0 +1,4 @@
+* text=auto
+
+# The container entrypoint is executed by /bin/sh, which cannot read CRLF.
+*.sh text eol=lf

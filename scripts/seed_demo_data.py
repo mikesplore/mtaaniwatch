@@ -1,12 +1,22 @@
-"""Idempotently load clearly labeled Mombasa demo records."""
+"""Idempotently load clearly labeled Mombasa demo records.
 
+This runs on every container start, so it must stay safe to repeat: existing
+areas, crews, and reports are left alone and only missing rows are inserted.
+"""
+
+import logging
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.database import SessionLocal
-from app.models import Area, Crew, Report, Task, TaskStatus, TaskStatusHistory
+from app.models import REPORT_CATEGORIES, Area, Crew, Report, Task, TaskStatus, TaskStatusHistory
+
+
+logger = logging.getLogger("mtaaniwatch.seed")
+# Keeps two containers starting together from inserting the same demo rows.
+SEED_LOCK_ID = 174821934
 
 
 AREAS = [    
@@ -71,7 +81,7 @@ CREWS = [
 
 REPORTS = [
     {
-        "reference": "MW-2026-001", "category": "blocked_drain", "area": "Changamwe",
+        "reference": "MW-2026-001", "category": "drainage_flooding", "area": "Changamwe",
         "landmark": "Near Changamwe Hospital main gate",
         "impact": "Water pooling on the road, blocking ambulance access.",
         "summary": "Drain has been blocked by plastic waste for two days. Rain is expected tonight.",
@@ -89,7 +99,7 @@ REPORTS = [
                     ("in_progress", "Crew dispatched.", "2026-09-23 16:00:00")],
     },
     {
-        "reference": "MW-2026-003", "category": "flooding", "area": "Mjamboni",
+        "reference": "MW-2026-003", "category": "drainage_flooding", "area": "Mjamboni",
         "landmark": "Mjamboni Stage near the petrol station",
         "impact": "Pedestrians cannot cross; matatus detouring.",
         "summary": "Heavy rain caused drain overflow. Water is knee-deep.",
@@ -100,7 +110,7 @@ REPORTS = [
                     ("resolved", "Drain cleared, water receding.", "2026-09-22 13:45:00")],
     },
     {
-        "reference": "MW-2026-004", "category": "infrastructure", "area": "Mji wa Kale",
+        "reference": "MW-2026-004", "category": "other", "area": "Mji wa Kale",
         "landmark": "Corner of Biashara Street and Nkrumah Street",
         "impact": "Security risk at night.", "summary": "Streetlight has been off for three days.",
         "language": "en", "source": "web_form", "verified": False,
@@ -109,7 +119,7 @@ REPORTS = [
                     ("cancelled", "Duplicate report already being handled by another utility.", "2026-09-22 10:00:00")],
     },
     {
-        "reference": "MW-2026-005", "category": "blocked_drain", "area": "Kipevu",
+        "reference": "MW-2026-005", "category": "drainage_flooding", "area": "Kipevu",
         "landmark": "Near Kipevu Oil Terminal entrance", "impact": "Foul smell entering nearby houses.",
         "summary": "Drain covered by industrial sludge and leaves.", "language": "sw", "source": "sms",
         "verified": False, "created": "2026-09-24 09:15:00", "status": "reported", "crew": None, "history": [],
@@ -123,7 +133,7 @@ REPORTS = [
                     ("in_progress", "Truck en route.", "2026-09-23 14:00:00")],
     },
     {
-        "reference": "MW-2026-007", "category": "flooding", "area": "Changamwe",
+        "reference": "MW-2026-007", "category": "drainage_flooding", "area": "Changamwe",
         "landmark": "Changamwe Market main entrance", "impact": "Vendors unable to set up stalls.",
         "summary": "Rainwater from the hill has flooded the market path.", "language": "sw", "source": "whatsapp",
         "verified": True, "created": "2026-09-20 06:30:00", "status": "resolved", "crew": "Changamwe Community Volunteers",
@@ -132,7 +142,7 @@ REPORTS = [
                     ("resolved", "Water diverted.", "2026-09-20 12:00:00")],
     },
     {
-        "reference": "MW-2026-008", "category": "infrastructure", "area": "Mjamboni",
+        "reference": "MW-2026-008", "category": "other", "area": "Mjamboni",
         "landmark": "Mjamboni Health Centre perimeter wall",
         "impact": "Wall collapsing onto the footpath.", "summary": "Section of the wall is cracked and leaning.",
         "language": "en", "source": "web_form", "verified": False,
@@ -149,7 +159,7 @@ REPORTS = [
                     ("in_progress", "Clean-up crew assigned.", "2026-09-24 12:00:00")],
     },
     {
-        "reference": "MW-2026-010", "category": "blocked_drain", "area": "Likoni",
+        "reference": "MW-2026-010", "category": "drainage_flooding", "area": "Likoni",
         "landmark": "Near Likoni Ferry terminal queue area",
         "impact": "Foul smell and potential health hazard for commuters.",
         "summary": "Drain blocked by sand and waste near the ferry approach.",
@@ -246,7 +256,15 @@ def dt(value: str) -> datetime:
 
 
 def seed() -> None:
+    unsupported = sorted({item["category"] for item in REPORTS} - REPORT_CATEGORIES)
+    if unsupported:
+        raise ValueError(
+            "Demo reports use categories the app does not support, so coordinators "
+            f"could not triage or cluster them: {unsupported}"
+        )
+
     with SessionLocal.begin() as db:
+        db.execute(text("SELECT pg_advisory_xact_lock(0, :lock_id)"), {"lock_id": SEED_LOCK_ID})
         areas: dict[str, Area] = {}
         for name, description in AREAS:
             area = db.scalar(select(Area).where(Area.name == name))
@@ -265,9 +283,11 @@ def seed() -> None:
             crews[name] = crew
         db.flush()
 
+        created = 0
         for item in REPORTS:
             if db.scalar(select(Report).where(Report.reference == item["reference"])):
                 continue
+            created += 1
             report = Report(
                 reference=item["reference"], category=item["category"], area=item["area"],
                 area_ref=areas[item["area"]], landmark=item["landmark"],
@@ -284,7 +304,15 @@ def seed() -> None:
             db.add(report)
             db.add(task)
 
+        logger.info(
+            "Seed complete: %s area(s), %s crew(s) ensured; %s new demo report(s) added",
+            len(AREAS),
+            len(CREWS),
+            created,
+        )
+
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     seed()
     print("Demo areas, crews, and reports are seeded.")
