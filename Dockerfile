@@ -22,8 +22,15 @@ COPY migrations ./migrations
 COPY alembic.ini ./
 COPY --from=frontend-build /frontend/dist ./frontend/dist
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir . \
+    && sed -i 's/\r$//' ./scripts/docker_entrypoint.sh \
+    && chmod +x ./scripts/docker_entrypoint.sh
+
+# Seeding runs on start so a fresh container has demo areas, crews, and reports.
+# Set SEED_DEMO_DATA=false to start against real data only.
+ENV SEED_DEMO_DATA=true \
+    PORT=9002
 
 EXPOSE 9002
 
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 9002"]
+CMD ["./scripts/docker_entrypoint.sh"]

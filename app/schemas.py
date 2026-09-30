@@ -28,9 +28,26 @@ class ReportReviewEventRead(BaseModel):
     created_at: datetime
 
 
-class ReportRead(ReportCreate):
+class ReportRead(BaseModel):
+    """A stored report as the coordinator dashboard reads it.
+
+    Read fields are deliberately unconstrained. The write constraints on
+    ReportCreate guard what enters the database; re-applying them here would let
+    a single row that predates a constraint fail the whole report list and leave
+    the dashboard with nothing to show.
+    """
+
     model_config = ConfigDict(from_attributes=True)
 
+    category: str
+    area: str | None
+    landmark: str | None
+    impact_reported: list[str]
+    summary: str
+    language: str | None
+    source: str
+    resident_phone: str | None
+    is_demo: bool
     id: int
     reference: str
     verified: bool

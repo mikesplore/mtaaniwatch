@@ -21,6 +21,8 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://mtaaniwatch:${DATABASE_PASSWORD:-mtaaniwatch}@db:5432/mtaaniwatchdb
       DATABASE_PASSWORD: ${DATABASE_PASSWORD:-mtaaniwatch}
+      # Load the labeled Mombasa demo records on start; set to false for real data only.
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
     depends_on:
       db:
         condition: service_healthy

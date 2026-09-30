@@ -8,6 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 class Settings(BaseSettings):
     app_name: str = "MtaaniWatch API"
+    log_level: str = "INFO"
     database_url: str = "postgresql+psycopg://mike@localhost:5432/mtaaniwatchdb"
     database_password: str | None = None
     groq_api_key: str | None = None
